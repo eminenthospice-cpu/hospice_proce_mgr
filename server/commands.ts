@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { addDays, isDate, evaluateGate, validateEvidence, canReconcile, laToday, initialState, newId, type AppState, type Patient, type Task, type Evidence } from '../lib/domain.ts';
 import { can, type Actor, type Permission } from '../lib/permissions.ts';
 import { assert } from './types.ts';
+import { isLimitedPatientName } from '../lib/patient-privacy.ts';
 
 const id=z.string().min(1).max(100).regex(/^[\w-]+$/),date=z.string().refine(isDate),text=z.string().trim().min(1).max(120),amount=z.number().int().min(0).max(100000000);
 export const patientInput=z.object({id,number:z.string().trim().min(1).max(40),name:z.string().trim().min(1).max(120),admissionDate:date,electionDate:date,periodStart:date,period:z.number().int().min(1).max(100),level:z.enum(['RHC','GIP','CHC','IRC']),location:z.enum(['Home','SNF/NF']),facility:text,physician:text,attendingIsMD:z.boolean(),owner:text}).strict();
@@ -41,6 +42,7 @@ export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAll
   case 'patient.create':{
    requirePermission(actor,'patient.create');const input=command.patient;uniqueId(state,input.id);
    assert(phiAllowed||(input.number.startsWith('DEMO-')&&input.name.startsWith('데모')),423,'phi_not_approved','실제 환자정보 처리가 승인되지 않은 환경입니다. 가상 데이터만 사용할 수 있습니다.');
+   assert(!phiAllowed||isLimitedPatientName(input.name),422,'limited_name_required','환자 표시명은 첫 이니셜과 성만 입력하세요. 예: J. Smith. 전체 이름은 저장하지 않습니다.');
    assert(!state.patients.some(p=>p.number.toLowerCase()===input.number.toLowerCase()),409,'duplicate_patient','같은 환자번호가 이미 있습니다.');
    assert(input.electionDate<=input.admissionDate&&input.admissionDate<=today&&input.periodStart<=today,422,'invalid_dates','선택 효력일·입원일·현재 기간 시작일을 확인하세요.');
    const checks={election:false,addendum:input.electionDate<'2026-10-01',cti:false,noe:false,recert:input.period===1,f2f:input.period<3,poc:false,medication:false,days:true,adr:true,auth:true,duplicate:true};

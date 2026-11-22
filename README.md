@@ -71,10 +71,12 @@ D1 구조의 원본은 `db/schema.ts`, 마이그레이션은 `drizzle/`입니다
 
 ## 실환자 운영 제한
 
-현재 승인된 BAA 환경이 없습니다. Cloudflare 계정이나 도메인을 보유하는 것만으로 BAA가 체결되거나 모든 제품에 적용되는 것은 아닙니다. [Cloudflare HIPAA 안내](https://www.cloudflare.com/resources/assets/slt3lc6tev37/3PeVHvuZAh7p3tN77kIfhG/596a459dd1cfbc2ad6b1dbef36ff0eb1/BDES-1265_Privacy_Compliance_Whitepapers_HIPAA.pdf)와 계약 담당자를 통해 **Workers·D1·Access 각각의 적용 여부**를 확인해야 합니다. 실환자 운영 전 기관의 접근 통제, 백업·복구, 키 관리, 감사 보존과 운영 검토도 필요합니다.
+현재 이 계정의 체결된 BAA는 확인되지 않았습니다. 최신 [Cloudflare HIPAA FAQ](https://www.cloudflare.com/trust-hub/compliance-resources/hipaa/)에는 **Workers·D1·Access가 HIPAA AoC 범위**로 명시되어 있지만, 기관의 실제 PHI 처리에는 Enterprise BAA를 양측이 체결하고 적용 계정·서비스와 조건을 확인해야 합니다. 현재 계정은 Workers Free / Teams Free이며 단순 유료 업그레이드는 BAA를 대신하지 않습니다. 실환자 운영 전 기관의 접근 통제, 백업·복구, 키 관리, 감사 보존과 운영 검토도 필요합니다.
 
 환자 생성 API는 `DEMO-` 번호와 `데모`로 시작하는 이름만 허용합니다. 자유 텍스트가 자동으로 비식별화되는 것은 아니므로 실제 환자·임상·연락처 정보를 입력하지 마세요. 빈 DB에만 고정 가상 샘플 30명을 추가할 수 있습니다. `PHI_PROCESSING_APPROVED`를 계약·기관 검토 없이 변경하지 마세요.
 
 빌드는 `out/`와 `dist/server/index.js`를 생성합니다. `next dev`만으로는 Worker API가 실행되지 않습니다. 실제 직원의 로그인과 인증 앱 등록은 각 사용자가 직접 진행합니다. 테스트는 날짜·청구 게이트, JWT 위조·범위·만료, 직원 승인·역할, MFA·복구 코드, 세션 만료, 암호화, CSRF, 요청 크기, 동시 저장과 감사 기록 보호를 검증합니다.
 
 전자서명, EHR·MAC 실제 전송, 계약 요율 계산, 전체 기간 이력, CSV 가져오기와 자동 알림은 구현 범위 밖입니다. AR aging은 화면에 명시한 입금일 기준입니다.
+
+계약·백업·키 복구·가동 승인 진행 상태는 [실환자 운영 전환 기록](docs/production-readiness.md)에 기록합니다. 운영 모드의 환자 표시명은 `J. Smith`처럼 첫 이니셜과 성만 저장하며 전체 이름 형식은 서버에서 거부합니다. 이 표기와 내부번호도 PHI로 관리하며 현재 실환자 입력 제한은 유지합니다.

@@ -56,3 +56,25 @@ test('ACCESS: issuer, audience, expiration, nbf and human identity are enforced'
   assert.equal((await call(env,owner,'/api/health')).body.authentication,'Cloudflare Access + TOTP');
  }finally{db.close();}
 });
+
+test('PRIVACY: approved environments store only an initial and surname; approval remains mandatory',async()=>{
+ const {db,env,owner}=fixture();try{
+  await enroll(env,owner);
+  const p={id:'privacy-p1',number:'INTERNAL-TEST-1',name:'J. Smith',admissionDate:'2026-11-22',electionDate:'2026-11-22',periodStart:'2026-11-22',period:1,level:'RHC',location:'Home',facility:'Home',physician:'Test Physician',attendingIsMD:true,owner:owner.name};
+  assert.equal((await command(env,owner,{type:'patient.create',patient:p})).status,423);
+  const approved={...env,PHI_PROCESSING_APPROVED:'true'};
+  for(const name of ['John Smith','J Smith','JS','J. Smith\nJohn Smith']){
+   const rejected=await command(approved,owner,{type:'patient.create',patient:{...p,name}});
+   assert.equal(rejected.status,422,name);assert.equal(rejected.body.error.code,'limited_name_required');
+  }
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE kind='patients'").get()!.n,0);
+  for(const [i,name] of ['J. Smith',"A. O’Neill",'M. de la Cruz','É. García'].entries()){
+   const patient={...p,id:`privacy-p${i+1}`,number:`INTERNAL-TEST-${i+1}`,name};
+   const created=await command(approved,owner,{type:'patient.create',patient});assert.equal(created.status,200,name);
+   assert.equal((await call(approved,owner,`/api/patients/${patient.id}/name`)).body.name,name);
+   const raw=db.sqlite.prepare('SELECT ciphertext FROM records WHERE id=? AND kind=?').get(patient.id,'patients')!;
+   const stored=await decrypt<{name:string;number:string}>(String(raw.ciphertext),env.DATA_ENCRYPTION_KEY,`${AGENCY_ID}:patients:${patient.id}`);
+   assert.equal(stored.name,name);assert.equal(stored.number,patient.number);assert.ok(!String(raw.ciphertext).includes(name));
+  }
+ }finally{db.close();}
+});
