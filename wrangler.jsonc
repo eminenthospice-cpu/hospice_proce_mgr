@@ -6,19 +6,32 @@
   "compatibility_date": "2026-11-22",
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{ "pattern": "mgr.eminenthospice.com", "custom_domain": true }],
-  "build": { "command": "npm run build" },
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "eminent-hospice-mgr",
-    "database_id": "d86f7ab8-9cb3-48a1-9431-9760a491ac86",
-    "migrations_dir": "drizzle"
-  }],
+  "routes": [
+    {
+      "pattern": "mgr.eminenthospice.com",
+      "custom_domain": true
+    }
+  ],
+  "build": {
+    "command": "npm run build"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "eminent-hospice-mgr",
+      "database_id": "d86f7ab8-9cb3-48a1-9431-9760a491ac86",
+      "migrations_dir": "drizzle"
+    }
+  ],
   "vars": {
     "OWNER_EMAIL": "slee1005@gmail.com",
     "SITE_ORIGIN": "https://mgr.eminenthospice.com",
-    "PHI_PROCESSING_APPROVED": "false"
+    "PHI_PROCESSING_APPROVED": "false",
+    "CF_ACCESS_TEAM_DOMAIN": "frosty-shadow-9706.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "60814cb7c1d9fd824ce8ac6a85527f7c9ff64c2b1d89320c29827ff6ed51c9ee"
   },
-  "observability": { "enabled": false },
+  "observability": {
+    "enabled": false
+  },
   "send_metrics": false
 }

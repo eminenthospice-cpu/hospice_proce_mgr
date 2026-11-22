@@ -6,7 +6,9 @@ Next.js 15 / React 19 UI와 서버 API를 단일 Cloudflare Worker로 빌드합�
 
 - Cloudflare 계정: `Eminenthospice@gmail.com's Account` (`aca0fd772c7c9e078fed7979460d4d28`).
 - 생성한 D1: `eminent-hospice-mgr` (`d86f7ab8-9cb3-48a1-9431-9760a491ac86`). Western North America 배치 힌트이며 데이터 주권 보장은 아닙니다.
-- Worker·도메인·DB 마이그레이션은 `wrangler.jsonc`에 준비되어 있습니다. 실제 배포에는 해당 계정의 CLI 승인과 Cloudflare Access 활성화가 필요합니다.
+- Worker `eminent-hospice-mgr`를 `https://mgr.eminenthospice.com`에 배포했습니다. D1 마이그레이션 2개가 원격 적용되어 앱 테이블 11개와 감사 보호 트리거 2개를 확인했습니다.
+- Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 One-time PIN만 사용하고 개별 초대 이메일 정책을 적용합니다. 초기 허용 이메일은 `slee1005@gmail.com` 하나입니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 적용했습니다.
+- 최종 Worker 버전: `8d2d4045-b544-4614-937e-8ec62f9dfd67` (2026-11-22). 비로그인 화면·업무 API는 Access 로그인으로 이동합니다. 실제 직원의 첫 이메일 인증·TOTP 등록은 본인이 진행해야 합니다.
 - 기존 Sites의 `records`와 `members`가 비어 있음을 2026-11-22에 확인했습니다. 새 D1에서 시작하며 기존 Sites 앱과 비밀 키는 변경하지 않았습니다. 이후 기존 사이트에 데이터가 추가되면 두 환경을 동시에 업무에 사용하지 말고 이관 범위를 다시 확인하세요.
 - `PHI_PROCESSING_APPROVED=false`입니다. BAA와 Workers·D1·Access의 계약상 적용 범위를 확인하기 전에는 실제 환자정보를 입력하지 마세요.
 
@@ -37,15 +39,14 @@ npm run cf:dry-run
 
 ```sh
 npx wrangler auth create eminent-hospice --scopes account:read user:read workers:write workers_routes:write workers_scripts:write d1:write zone:read ssl_certs:write
+npx wrangler auth activate eminent-hospice
 npm run cf:whoami
 npm run cf:migrate
 ```
 
-Access 앱의 팀 도메인과 AUD를 확인한 뒤 다음 값을 Worker secrets에 등록합니다. 실제 비밀 값을 소스·환경 파일·채팅에 넣지 마세요.
+Access 앱의 팀 도메인과 AUD는 공개 검증 메타데이터이며 `wrangler.jsonc`의 vars에 설정되어 있습니다. 암호화 키는 Worker secret에만 저장합니다. 이미 배포된 Worker에는 키가 등록되어 있으므로 다시 생성하지 마세요. 새 환경을 처음 만들 때만 아래 명령으로 등록합니다. 실제 비밀 값을 소스·환경 파일·채팅에 넣지 마세요.
 
 ```sh
-npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --profile eminent-hospice
-npx wrangler secret put CF_ACCESS_AUD --profile eminent-hospice
 npx wrangler secret put DATA_ENCRYPTION_KEY --profile eminent-hospice
 npm run cf:deploy
 ```

@@ -10,7 +10,7 @@
     "test": "node --experimental-strip-types --test lib/domain.test.ts server/*.test.ts",
     "build:client": "next build",
     "db:generate": "drizzle-kit generate",
-    "cf:whoami": "wrangler whoami --profile eminent-hospice",
+    "cf:whoami": "wrangler whoami",
     "cf:migrate": "wrangler d1 migrations apply DB --remote --profile eminent-hospice",
     "cf:deploy": "wrangler deploy --profile eminent-hospice",
     "cf:dry-run": "wrangler deploy --dry-run --outdir dist/cloudflare"
