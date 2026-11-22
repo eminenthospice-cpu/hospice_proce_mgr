@@ -1,0 +1,35 @@
+{
+  "name": "eminent-hospice-office-flow",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "npm run build:client && node scripts/build-worker.mjs",
+    "start": "next start",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test lib/domain.test.ts server/*.test.ts",
+    "build:client": "next build",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "lucide-react": "^0.468.0",
+    "zod": "^4.6.7",
+    "qrcode.react": "^4.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.25.12",
+    "drizzle-kit": "^0.31.0",
+    "drizzle-orm": "^0.45.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.23",
+    "esbuild": "^0.25.12"
+  }
+}

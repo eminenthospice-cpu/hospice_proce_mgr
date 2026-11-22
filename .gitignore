@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.env*
+.sites-local/
+*.tar.gz
+*.tgz
+
+dist/
+.wrangler/
+.dev.vars
