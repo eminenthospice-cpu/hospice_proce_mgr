@@ -1,13 +1,18 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { handleApi } from './api.ts';
 import { TestDatabase } from './test-database.ts';
 import type { Env } from './types.ts';
 import { totp,encrypt,decrypt } from './crypto.ts';
 import { AGENCY_ID } from './store.ts';
 type Who={id:string;email:string;name:string;cookie?:string};
-function fixture(){const db=new TestDatabase();const env:Env={DB:db,DATA_ENCRYPTION_KEY:'11'.repeat(32),OWNER_EMAIL:'owner@example.test',SITE_ORIGIN:'https://office.example.test'};const owner:Who={id:'trusted-owner',email:env.OWNER_EMAIL,name:'테스트 관리자'};return {db,env,owner};}
-async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={};if(who){headers['oai-authenticated-user-id']=who.id;headers['oai-authenticated-user-email']=who.email;headers['oai-authenticated-user-full-name']=encodeURIComponent(who.name);headers['oai-authenticated-user-full-name-encoding']='percent-encoded-utf-8';if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
+const keys=await generateKeyPair('RS256');
+const jwk={...await exportJWK(keys.publicKey),kid:'test-key',alg:'RS256',use:'sig'};
+mock.method(globalThis,'fetch',async(input:RequestInfo|URL)=>{assert.equal(String(input),'https://hospice-test.cloudflareaccess.com/cdn-cgi/access/certs');return Response.json({keys:[jwk]});});
+async function accessToken(env:Env,who:Who,claims:Record<string,unknown>={},key=keys.privateKey){return new SignJWT({type:'app',email:who.email,name:who.name,...claims}).setProtectedHeader({alg:'RS256',kid:'test-key'}).setIssuer(`https://${env.CF_ACCESS_TEAM_DOMAIN}`).setAudience(env.CF_ACCESS_AUD).setSubject(who.id).setIssuedAt().setExpirationTime('1h').sign(key);}
+function fixture(){const db=new TestDatabase();const env:Env={DB:db,DATA_ENCRYPTION_KEY:'11'.repeat(32),OWNER_EMAIL:'owner@example.test',SITE_ORIGIN:'https://office.example.test',CF_ACCESS_TEAM_DOMAIN:'hospice-test.cloudflareaccess.com',CF_ACCESS_AUD:'test-access-audience'};const owner:Who={id:'trusted-owner',email:env.OWNER_EMAIL,name:'테스트 관리자'};return {db,env,owner};}
+async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={};if(who){headers['Cf-Access-Jwt-Assertion']=await accessToken(env,who);if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
 async function enroll(env:Env,who:Who){const start=await call(env,who,'/api/auth/start','POST',{});assert.equal(start.status,200);who.cookie=start.cookie;const setup=await call(env,who,'/api/auth/enrollment');assert.equal(setup.status,200);const code=await totp(setup.body.secret,Math.floor(Date.now()/30000));const verify=await call(env,who,'/api/auth/verify','POST',{code});assert.equal(verify.status,200);return {secret:setup.body.secret,codes:verify.body.recoveryCodes as string[]};}
 async function command(env:Env,who:Who,cmd:unknown,version?:number,requestId=crypto.randomUUID()){const snapshot=version===undefined?await call(env,who,'/api/workspace'):null;return call(env,who,'/api/commands','POST',{requestId,version:version??snapshot!.body.version,command:cmd});}
 async function staff(env:Env,who:Who,name:string,role:string){const snap=await call(env,who,'/api/workspace');const email=`${role}@example.test`;const result=await call(env,who,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email,name,roles:[role],patientIds:[],status:'active'}});assert.equal(result.status,200);const member:Who={id:`trusted-${role}`,email,name};await enroll(env,member);return member;}
@@ -24,3 +29,30 @@ test('SEC: physician scope and session expiry enforced on server',async()=>{cons
 test('CRYPTO: RFC 6238 vector and authenticated tenant-specific encryption',async()=>{assert.equal(await totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',1),'287082');const key='22'.repeat(32),encrypted=await encrypt({name:'DEMO'},key,'agency-a:patients:p1');assert.deepEqual(await decrypt(encrypted,key,'agency-a:patients:p1'),{name:'DEMO'});await assert.rejects(decrypt(encrypted,key,'agency-b:patients:p1'));});
 test('SEC: self-registration stays pending until admin assigns a role',async()=>{const {db,env,owner}=fixture();try{const worker:Who={id:'new-worker',email:'new@example.test',name:'신규 직원'};assert.equal((await call(env,worker,'/api/auth/session')).body.phase,'request');assert.equal((await call(env,worker,'/api/auth/request-access','POST',{})).status,200);assert.equal((await call(env,worker,'/api/auth/session')).body.phase,'pending');assert.equal((await call(env,worker,'/api/auth/start','POST',{})).status,403);assert.equal((await call(env,worker,'/api/workspace')).status,401);await enroll(env,owner);const snap=await call(env,owner,'/api/workspace'),pending=snap.body.members.find((m:{email:string})=>m.email===worker.email);assert.equal(pending.status,'pending');assert.deepEqual(pending.roles,[]);const approved=await call(env,owner,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{id:pending.id,email:pending.email,name:pending.name,roles:['read_only'],patientIds:[],status:'active'}});assert.equal(approved.status,200);await enroll(env,worker);assert.equal((await call(env,worker,'/api/workspace')).status,200);}finally{db.close();}});
 test('SEC: sensitive actions require recent MFA and oversized JSON is rejected',async()=>{const {db,env,owner}=fixture();try{const enrolled=await enroll(env,owner);db.sqlite.prepare('UPDATE sessions SET verified_at=?').run(Date.now()-301000);assert.equal((await command(env,owner,{type:'samples.load'})).status,428);assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:enrolled.codes[0]})).status,200);assert.equal((await command(env,owner,{type:'samples.load'})).status,200);assert.equal((await call(env,owner,'/api/commands','POST',{garbage:'x'.repeat(100001)})).status,413);}finally{db.close();}});
+
+test('ACCESS: unsigned identity headers and forged signatures cannot bootstrap the owner',async()=>{
+ const {db,env,owner}=fixture();try{
+  const headers={'Origin':env.SITE_ORIGIN,'Content-Type':'application/json','oai-authenticated-user-id':owner.id,'oai-authenticated-user-email':owner.email,'Cf-Access-Authenticated-User-Email':owner.email};
+  const unsigned=await handleApi(new Request(env.SITE_ORIGIN+'/api/auth/start',{method:'POST',headers,body:'{}'}),env);
+  assert.equal(unsigned.status,401);
+  const attacker=await generateKeyPair('RS256');
+  const forged=await accessToken(env,owner,{},attacker.privateKey);
+  assert.equal((await handleApi(new Request(env.SITE_ORIGIN+'/api/auth/start',{method:'POST',headers:{...headers,'Cf-Access-Jwt-Assertion':forged},body:'{}'}),env)).status,401);
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM members').get()!.n,0);
+ }finally{db.close();}
+});
+test('ACCESS: issuer, audience, expiration, nbf and human identity are enforced',async()=>{
+ const {db,env,owner}=fixture();try{
+  const tokens=[
+   await accessToken({...env,CF_ACCESS_AUD:'another-app'},owner),
+   await accessToken({...env,CF_ACCESS_TEAM_DOMAIN:'another-team.cloudflareaccess.com'},owner),
+   await accessToken(env,owner,{type:'service'}),
+   await accessToken(env,owner,{email:''}),
+   await accessToken(env,owner,{nbf:Math.floor(Date.now()/1000)+600}),
+   await new SignJWT({type:'app',email:owner.email}).setProtectedHeader({alg:'RS256',kid:'test-key'}).setIssuer(`https://${env.CF_ACCESS_TEAM_DOMAIN}`).setAudience(env.CF_ACCESS_AUD).setSubject(owner.id).setIssuedAt(Math.floor(Date.now()/1000)-7200).setExpirationTime(Math.floor(Date.now()/1000)-3600).sign(keys.privateKey),
+  ];
+  for(const jwt of tokens)assert.equal((await handleApi(new Request(env.SITE_ORIGIN+'/api/auth/session',{headers:{'Cf-Access-Jwt-Assertion':jwt}}),env)).status,401);
+  const missing={...env,CF_ACCESS_AUD:''};assert.equal((await call(missing,owner,'/api/auth/session')).status,503);
+  assert.equal((await call(env,owner,'/api/health')).body.authentication,'Cloudflare Access + TOTP');
+ }finally{db.close();}
+});

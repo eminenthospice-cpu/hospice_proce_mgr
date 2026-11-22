@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { can, roleLabels, type Actor, type WorkspaceSession } from '../lib/permissions.ts';
 import { commandSchema, reduceCommand, canSeePatient } from './commands.ts';
 import { ApiError, assert, type Env } from './types.ts';
-import { identity, readSession, verifyOrigin, startSession, enrollment, verifyMfa, logout, cookie, requireRecent,limit } from './auth.ts';
+import { readSession, verifyOrigin, startSession, enrollment, verifyMfa, logout, cookie, requireRecent,limit } from './auth.ts';
+import { identity } from './identity.ts';
 import { AGENCY_ID, asStaff, memberByIdentity, readWorkspace, filteredState, logAudit, commitState, commandFingerprint, type MemberRow } from './store.ts';
 import { randomHex } from './crypto.ts';
 
@@ -21,10 +22,10 @@ export async function handleApi(request:Request,env:Env):Promise<Response>{
  let actor:Actor|undefined;const requestId=randomHex(8);const path=new URL(request.url).pathname;
  try{
   assert(env.DB&&env.DATA_ENCRYPTION_KEY&&env.OWNER_EMAIL&&env.SITE_ORIGIN,503,'not_configured','서버 DB·암호화·관리자 설정이 준비되지 않았습니다.');
-  if(path==='/api/health'&&request.method==='GET'){const row=await env.DB.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('agencies','members','records','sessions','audit_events','transaction_guards')").first<{count:number}>();return json({ok:row?.count===6,database:'D1',schema:1,authentication:'ChatGPT + TOTP',phiProcessing:env.PHI_PROCESSING_APPROVED==='true'},row?.count===6?200:503);}
+  if(path==='/api/health'&&request.method==='GET'){await identity(request,env);const row=await env.DB.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('agencies','members','records','sessions','audit_events','transaction_guards')").first<{count:number}>();return json({ok:row?.count===6,database:'D1',schema:1,authentication:'Cloudflare Access + TOTP',phiProcessing:env.PHI_PROCESSING_APPROVED==='true'},row?.count===6?200:503);}
   if(request.method!=='GET')verifyOrigin(request,env);
   if(path==='/api/auth/request-access'&&request.method==='POST'){
-   const who=identity(request);await limit(env,`request:${who.userId}`,3);
+   const who=await identity(request,env);await limit(env,`request:${who.userId}`,3);
    assert(who.email!==env.OWNER_EMAIL.toLowerCase(),409,'admin_start','최초 관리자는 업무 세션 시작을 선택하세요.');
    await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO agencies (id,name,version,audit_head,created_at) VALUES (?,?,0,?,?)').bind(AGENCY_ID,'Eminent Hospice Care','GENESIS',new Date().toISOString()),
@@ -36,7 +37,7 @@ export async function handleApi(request:Request,env:Env):Promise<Response>{
   if(path==='/api/auth/verify'&&request.method==='POST'){const input=z.object({code:z.string().min(6).max(16)}).strict().parse(await body(request));return json(await verifyMfa(request,env,input.code));}
   if(path==='/api/auth/logout'&&request.method==='POST'){await logout(request,env);return json({ok:true},200,{'Set-Cookie':cookie('',0)});}
   if(path==='/api/auth/session'&&request.method==='GET'){
-   const who=identity(request);try{const s=await readSession(request,env,true);if(!s.session.verified_at)return json({phase:s.member.mfa_secret?'mfa':'enroll',email:who.email});return json({phase:'ready',actor:s.actor});}
+   const who=await identity(request,env);try{const s=await readSession(request,env,true);if(!s.session.verified_at)return json({phase:s.member.mfa_secret?'mfa':'enroll',email:who.email});return json({phase:'ready',actor:s.actor});}
    catch(error){if(error instanceof ApiError&&error.status===401){const m=await memberByIdentity(env,who.userId,who.email);if(m?.status==='disabled')throw new ApiError(403,'access_revoked','관리자가 접근을 해제한 계정입니다.');return json({phase:m?.status==='pending'?'pending':m?.status==='active'||who.email===env.OWNER_EMAIL.toLowerCase()?'start':'request',email:who.email});}throw error;}
   }
   const auth=await readSession(request,env);actor=auth.actor;

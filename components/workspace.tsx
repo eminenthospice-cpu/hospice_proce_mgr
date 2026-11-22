@@ -266,7 +266,7 @@ export default function Workspace({ initialEnvelope, onExpired }: {
     }
     finally {
         onExpired();
-        location.assign('/signout-with-chatgpt?return_to=%2F');
+        location.assign('/auth/logout');
     } }
     useEffect(() => { let activity = Date.now(); const active = () => { activity = Date.now(); }; const events = ['pointerdown', 'pointermove', 'keydown', 'scroll']; events.forEach(e => window.addEventListener(e, active, { passive: true })); const timer = setInterval(() => { if (Date.now() - activity >= 900000) {
         void fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}' });

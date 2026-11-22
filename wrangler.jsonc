@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eminent-hospice-mgr",
+  "account_id": "aca0fd772c7c9e078fed7979460d4d28",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-11-22",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "mgr.eminenthospice.com", "custom_domain": true }],
+  "build": { "command": "npm run build" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "eminent-hospice-mgr",
+    "database_id": "d86f7ab8-9cb3-48a1-9431-9760a491ac86",
+    "migrations_dir": "drizzle"
+  }],
+  "vars": {
+    "OWNER_EMAIL": "slee1005@gmail.com",
+    "SITE_ORIGIN": "https://mgr.eminenthospice.com",
+    "PHI_PROCESSING_APPROVED": "false"
+  },
+  "observability": { "enabled": false },
+  "send_metrics": false
+}

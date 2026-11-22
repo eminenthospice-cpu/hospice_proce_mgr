@@ -9,24 +9,30 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test lib/domain.test.ts server/*.test.ts",
     "build:client": "next build",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "cf:whoami": "wrangler whoami --profile eminent-hospice",
+    "cf:migrate": "wrangler d1 migrations apply DB --remote --profile eminent-hospice",
+    "cf:deploy": "wrangler deploy --profile eminent-hospice",
+    "cf:dry-run": "wrangler deploy --dry-run --outdir dist/cloudflare"
   },
   "dependencies": {
+    "jose": "^6.2.18",
+    "lucide-react": "^0.468.0",
     "next": "^15.5.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "lucide-react": "^0.468.0",
-    "zod": "^4.6.7",
-    "qrcode.react": "^4.2.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "esbuild": "^0.25.12",
     "drizzle-kit": "^0.31.0",
-    "drizzle-orm": "^0.45.0"
+    "drizzle-orm": "^0.45.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.166.0"
   },
   "overrides": {
     "postcss": "^8.5.23",
