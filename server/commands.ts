@@ -1,3 +1,4 @@
+import {emptyBilling,createBillingDemo,batchResidual,type PaymentBatch} from '../lib/billing-ledger.ts';
 import {orderStatuses, nextOrderStatus, orderClosed, createOrderDemo, ORDER_DEMO_PREFIX} from '../lib/orders.ts';
 import { z } from 'zod';
 import { addDays, isDate, evaluateGate, validateEvidence, canReconcile, laToday, initialState, newId, type AppState, type Patient, type Task, type Evidence } from '../lib/domain.ts';
@@ -9,6 +10,11 @@ import {createCensusDemo, CENSUS_DEMO_PREFIX} from '../lib/census-demo.ts';
 const id=z.string().min(1).max(100).regex(/^[\w-]+$/),date=z.string().refine(isDate),text=z.string().trim().min(1).max(120),amount=z.number().int().min(0).max(100000000);
 export const patientInput=z.object({id,number:z.string().trim().min(1).max(40),name:z.string().trim().min(1).max(120),admissionDate:date,electionDate:date,periodStart:date,period:z.number().int().min(1).max(100),level:z.enum(['RHC','GIP','CHC','IRC']),location:z.enum(['Home','ALF','Residential','SNF/NF']),facility:text,physician:text,attendingIsMD:z.boolean(),owner:text}).strict();
 const evidence=z.object({reference:text,recordedAt:z.string().optional(),signer:z.string().max(100).optional(),signerRole:z.enum(['hospice_md','attending_md','employed_np','external_np','pa','patient','representative']).optional(),encounterDate:z.union([date,z.literal('')]).optional(),secondSigner:z.string().max(120).optional(),approvedDate:z.union([date,z.literal('')]).optional(),effectiveDate:z.union([date,z.literal('')]).optional()}).strict();
+const count=z.number().int().min(0).max(10000).nullable();
+const billingSource=z.object({file:z.string().min(1).max(120).refine(v=>!/[\\/]/.test(v)),hash:z.string().min(1).max(100),row:z.number().int().min(0).max(100000),synthetic:z.boolean()}).strict();
+const worksheetInput=z.object({id,patientId:id,month:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),pos:z.string().max(60),careDays:z.number().int().min(0).max(31).nullable(),careDayDetail:z.string().max(200),payer:z.string().max(80),roomBoard:z.string().max(80),visits:z.object({md:z.string().max(2000),rn:z.string().max(2000),lvn:z.string().max(2000),ha:z.string().max(2000),sw:z.string().max(2000),swPhone:z.string().max(2000),sc:z.string().max(2000)}).strict(),authorization:z.string().max(200),source:billingSource}).strict();
+const pharmacyInput=z.object({id,patientId:id,month:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),rxNumber:text,date,originalDate:z.string().max(120),drug:text,ndc:z.string().max(60),quantity:z.number().min(-100000).max(100000).nullable(),daysSupply:count,amount:z.number().int().min(-100000000).max(100000000).nullable(),amountType:z.enum(['retail','price','patient_pay']),financialStatus:z.string().max(60),source:billingSource}).strict();
+const paymentLineInput=z.object({id,patientId:id,controlNumber:text,payerClaimNumber:z.string().max(120),from:date,to:date,billed:amount,paid:amount,responsibility:amount,adjustments:z.array(z.object({group:z.enum(['CO','PR','OA','PI','CR']),reason:z.string().min(1).max(20),amount:z.number().int().min(-100000000).max(100000000)}).strict()).max(60),remarks:z.array(z.string().max(20)).max(30),status:z.enum(['1','2','3','4','19','20','21'])}).strict();
 export const commandSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('patient.create'),patient:patientInput}).strict(),
   z.object({type:z.literal('task.create'),task:z.object({id,patientId:id,title:text,category:z.enum(['서류','서명','SNF','Authorization','ADR','HOPE','물품','수납']),lane:z.enum(['admin','clinical','billing']),due:date,owner:text,note:z.string().max(200).optional()}).strict()}).strict(),
@@ -25,15 +31,20 @@ export const commandSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('samples.load')}).strict(),
   z.object({type:z.literal('samples.census')}).strict(),
   z.object({type:z.literal('samples.orders')}).strict(),
+  z.object({type:z.literal('samples.billing')}).strict(),
+  z.object({type:z.literal('billing.import'),worksheets:z.array(worksheetInput).max(60),pharmacy:z.array(pharmacyInput).max(60)}).strict(),
+  z.object({type:z.literal('billing.claim'),claim:z.object({id,patientId:id,from:date,to:date,reference:text,billed:amount.nullable()}).strict()}).strict(),
+  z.object({type:z.literal('billing.remit'),batch:z.object({id,reference:text,date,trace:z.string().max(120),method:z.enum(['ACH','CHK','NON','MANUAL']),netPayment:amount,providerAdjustment:z.number().int().min(-100000000).max(100000000),lines:z.array(paymentLineInput).min(1).max(60),source:billingSource}).strict()}).strict(),
+  z.object({type:z.literal('billing.bank'),batchId:id,date,amount,reference:text,confirmed:z.literal(true)}).strict(),
   z.object({type:z.literal('order.create'),order:z.object({id,patientId:id,kind:z.enum(['dme','medication']),item:text,supplier:text,reference:z.string().trim().max(120),neededBy:date}).strict()}).strict(),
   z.object({type:z.literal('order.status'),orderId:id,status:z.enum(orderStatuses),reason:z.string().trim().max(200).optional()}).strict(),
 ]);
 export type Command=z.infer<typeof commandSchema>;
-export function emptyWorkspace():AppState{return {schemaVersion:1,referenceDate:laToday(),patients:[],orders:[],tasks:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};}
+export function emptyWorkspace():AppState{return {...emptyBilling(),schemaVersion:1,referenceDate:laToday(),patients:[],orders:[],tasks:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};}
 function requirePermission(actor:Actor,p:Permission){assert(can(actor.roles,p),403,'forbidden','현재 직원 역할에는 이 작업 권한이 없습니다.');}
 export function canSeePatient(actor:Actor,patientId:string){return actor.roles.some(r=>r!=='physician')||actor.patientIds.includes(patientId);}
 function visiblePatient(actor:Actor,state:AppState,id:string){const p=state.patients.find(p=>p.id===id);assert(p&&canSeePatient(actor,id),404,'not_found','환자를 찾을 수 없습니다.');return p;}
-function uniqueId(state:AppState,id:string){assert(![...state.patients,...state.orders,...state.tasks,...state.claims,...state.remittances,...state.discharges].some(x=>x.id===id),409,'duplicate_id','이미 사용된 참조번호입니다.');}
+function uniqueId(state:AppState,id:string){assert(![...state.patients,...state.orders,...state.billingWorksheets,...state.pharmacyCharges,...state.billedClaims,...state.paymentBatches,...state.tasks,...state.claims,...state.remittances,...state.discharges].some(x=>x.id===id),409,'duplicate_id','이미 사용된 참조번호입니다.');}
 export function admissionTasks(p:Patient):Task[]{
  const rows:[string,Task['lane'],number,Task['category'],Task['gateCode']?][]=[['H&P 출처·작성자 확인','clinical',1,'서류'],['RN 초기 방문 수령 확인','clinical',2,'서류'],['포괄평가 완료 확인','clinical',5,'서류'],['오더·복약 대조','clinical',2,'서류','medication'],['선택 진술서 서명 확인','admin',0,'서류','election'],['동의서 별도 수령 확인','admin',0,'서류'],['NOE MAC 접수 확인','admin',5,'서류','noe'],['CTI 구두 인증 확보 확인','clinical',2,'서명'],['서면 CTI 서명 수령','clinical',2,'서명','cti'],['POC 승인·서명 확인','clinical',0,'서명','poc']];
  if(p.electionDate>='2026-10-01')rows.push(['Addendum 제공·수령 확인','admin',5,'서류','addendum']);
@@ -42,7 +53,7 @@ export function admissionTasks(p:Patient):Task[]{
  return rows.map(([title,lane,days,category,gateCode])=>({id:newId('task'),patientId:p.id,title,lane,category,gateCode,due:addDays(gateCode==='noe'||gateCode==='addendum'?p.electionDate:['cti','f2f','recert'].includes(gateCode||'')?p.periodStart:p.admissionDate,days),owner:p.owner,status:'todo',note:gateCode==='cti'?'청구 제출 전 서면 확보 필수. 표시일은 사무실 확인 목표일입니다.':title.startsWith('RN 초기')?'정확한 48시간 이행은 원본 EHR에서 확인하세요.':undefined}));
 }
 export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAllowed=false,now=new Date()):{state:AppState;action:string;entity:string;detail:string}{
- const state=structuredClone(before),today=laToday();state.orders??=[];state.referenceDate=today;
+ const state=structuredClone(before),today=laToday();state.orders??=[];for(const key of Object.keys(emptyBilling()) as (keyof ReturnType<typeof emptyBilling>)[])state[key]??=[];state.referenceDate=today;
  let action='',entity='',detail='서버 검증 후 처리';
  switch(command.type){
   case 'patient.create':{
@@ -97,6 +108,55 @@ export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAll
    else {assert(command.patientId,422,'patient_required','환자 참조가 필요합니다.');visiblePatient(actor,state,command.patientId);action='환자 조회';entity=command.patientId;}
    break;
   }
+  case 'billing.import':{
+   requirePermission(actor,'claim.write');assert(command.worksheets.length+command.pharmacy.length>0,422,'empty_import','ledger.emptyImport');
+   for(const [collection,rows] of [['billingWorksheets',command.worksheets],['pharmacyCharges',command.pharmacy]] as const){
+    for(const row of rows){const p=visiblePatient(actor,state,row.patientId);assert(phiAllowed||(row.source.synthetic&&row.source.file.startsWith('DEMO-')&&p.number.startsWith('DEMO-')),423,'phi_not_approved','ledger.demoOnly');
+     assert(row.month<=today.slice(0,7),422,'future_date','ledger.futureDate');
+     if('date' in row)assert(row.date<=today,422,'invalid_dates','ledger.invalidPeriod');
+     const prior=state[collection].find(x=>x.source.hash===row.source.hash&&x.source.row===row.source.row);assert(!prior||prior.patientId===row.patientId&&prior.month===row.month,409,'source_conflict','ledger.sourceConflict');
+     if(prior)continue;uniqueId(state,row.id);(state[collection] as unknown[]).push(row);
+    }
+   }
+   action='ledger.auditImport';entity='billing-import';detail='ledger.auditDetail';break;
+  }
+  case 'billing.claim':{
+   requirePermission(actor,'claim.write');const c=command.claim,p=visiblePatient(actor,state,c.patientId);assert(phiAllowed||p.number.startsWith('DEMO-')&&c.reference.startsWith('DEMO-'),423,'phi_not_approved','ledger.demoOnly');
+   uniqueId(state,c.id);assert(c.from<=c.to&&c.to<=today&&c.from>=p.admissionDate,422,'invalid_period','ledger.invalidPeriod');
+   assert(!state.billedClaims.some(x=>x.reference===c.reference),409,'duplicate_claim','ledger.duplicateClaim');state.billedClaims.push({...c,recordedAt:now.toISOString(),source:'biller'});
+   action='ledger.auditClaim';entity=c.id;detail='ledger.auditDetail';break;
+  }
+  case 'billing.remit':{
+   requirePermission(actor,'receipt.write');const b=command.batch;uniqueId(state,b.id);assert(b.date<=today,422,'future_date','ledger.futureDate');
+   assert(phiAllowed||(b.source.synthetic&&b.source.file.startsWith('DEMO-')&&b.reference.startsWith('DEMO-')),423,'phi_not_approved','ledger.demoOnly');
+   assert(!state.paymentBatches.some(x=>x.source.hash===b.source.hash||x.reference===b.reference&&x.date===b.date||b.trace&&x.trace===b.trace),409,'duplicate_remittance','ledger.duplicateRemit');
+   assert(!b.netPayment||b.trace.trim(),422,'trace_required','ledger.traceRequired');
+   const batch:PaymentBatch={...b,lines:[]};const selected=new Set<string>();
+   for(const l of b.lines){const p=visiblePatient(actor,state,l.patientId);assert(phiAllowed||p.number.startsWith('DEMO-')&&l.controlNumber.startsWith('DEMO-'),423,'phi_not_approved','ledger.demoOnly');
+    assert(l.from<=l.to&&l.to<=today&&l.from>=p.admissionDate,422,'invalid_period','ledger.invalidPeriod');assert(l.status!=='4'||l.paid===0,422,'invalid_payment','ledger.invalidPayment');
+    assert(!selected.has(l.controlNumber),409,'duplicate_claim','ledger.duplicateClaim');selected.add(l.controlNumber);
+    const matched=state.billedClaims.find(c=>c.reference===l.controlNumber);
+    assert(!matched||matched.patientId===l.patientId&&matched.from===l.from&&matched.to===l.to,409,'claim_mismatch','ledger.claimMismatch');
+    assert(!state.paymentBatches.some(x=>x.lines.some(y=>y.controlNumber===l.controlNumber||l.payerClaimNumber&&y.payerClaimNumber===l.payerClaimNumber)),409,'duplicate_claim_payment','ledger.repeatPayment');
+    let claim=matched;if(!claim){claim={id:newId('billed'),patientId:l.patientId,from:l.from,to:l.to,reference:l.controlNumber,billed:l.billed,recordedAt:now.toISOString(),source:'remittance'};state.billedClaims.push(claim);}
+    if(claim.billed===null)claim.billed=l.billed;
+    batch.lines.push({...l,claimId:claim.id});
+   }
+   state.paymentBatches.push(batch);action='ledger.auditRemit';entity=b.id;detail='ledger.auditDetail';break;
+  }
+  case 'billing.bank':{
+   requirePermission(actor,'receipt.write');const b=state.paymentBatches.find(b=>b.id===command.batchId);assert(b,404,'not_found','ledger.notFound');
+   assert(!b.bank&&b.netPayment>0&&batchResidual(b)===0,409,'not_reconcilable','ledger.notReconcilable');
+   assert(b.lines.every(l=>canSeePatient(actor,l.patientId)),403,'forbidden','ledger.forbidden');assert(command.amount===b.netPayment,422,'amount_mismatch','ledger.amountMismatch');assert(command.date<=today&&command.date>=b.date,422,'invalid_dates','ledger.bankDate');
+   assert(!state.paymentBatches.some(x=>x.bank?.reference===command.reference),409,'duplicate_deposit','ledger.duplicateDeposit');
+   b.bank={date:command.date,amount:command.amount,reference:command.reference,by:actor.name,at:now.toISOString()};action='ledger.auditBank';entity=b.id;detail='ledger.auditDetail';break;
+  }
+  case 'samples.billing':{
+   requirePermission(actor,'staff.manage');assert(!phiAllowed,423,'demo_only','가상 데이터는 검증 환경에서만 추가할 수 있습니다.');assert(!state.billingWorksheets.some(x=>x.id.startsWith('demo-ledger-')),409,'already_exists','ledger.demoExists');
+   assert(state.patients.filter(p=>p.number.startsWith(CENSUS_DEMO_PREFIX)).length>=12,409,'demo_patients_required','order.demoPatientsRequired');
+   const demo=createBillingDemo(state.patients,today);for(const key of Object.keys(demo) as (keyof typeof demo)[]){for(const row of demo[key])uniqueId(state,row.id);(state[key] as unknown[]).push(...demo[key]);}
+   action='ledger.auditDemo';entity='demo-billing';detail='ledger.auditDemoDetail';break;
+  }
   case 'order.create':{
    requirePermission(actor,'order.write');const input=command.order,p=visiblePatient(actor,state,input.patientId);uniqueId(state,input.id);
    assert(p.status!=='discharged',409,'invalid_state','order.patientDischarged');
@@ -123,7 +183,7 @@ export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAll
   case 'samples.census':{
    requirePermission(actor,'staff.manage');assert(!phiAllowed,423,'demo_only','가상 데이터는 검증 환경에서만 추가할 수 있습니다.');
    assert(!state.patients.some(p=>p.number.startsWith(CENSUS_DEMO_PREFIX)),409,'already_exists','이 가상 데모는 이미 추가되어 있습니다.');
-   const demo=createCensusDemo(today,actor.name),oldIds=new Set([...state.patients,...state.orders,...state.tasks,...state.claims,...state.remittances,...state.discharges].map(r=>r.id));
+   const demo=createCensusDemo(today,actor.name),oldIds=new Set([...state.patients,...state.orders,...state.billingWorksheets,...state.pharmacyCharges,...state.billedClaims,...state.paymentBatches,...state.tasks,...state.claims,...state.remittances,...state.discharges].map(r=>r.id));
    assert([...demo.patients,...demo.tasks].every(r=>!oldIds.has(r.id)),409,'duplicate_id','이미 사용된 참조번호입니다.');
    state.patients.push(...demo.patients);state.tasks.push(...demo.tasks);
    action='가상 Census 데모 추가';entity='demo-hmd-census';detail='가상 환자 38명 · 원본 환자 연결 없음 · 기존 데이터 유지';break;

@@ -6,8 +6,9 @@ export type Role = keyof typeof roleLabels;
 export type Staff = { id:string; name:string; email:string; roles:Role[]; patientIds:string[]; status:'active'|'disabled'|'pending'; mfaEnabled:boolean };
 export type Actor = Staff & { userId:string; agencyId:string };
 export type WorkspaceSession = { actor:Actor; members:Staff[]; version:number; phiAllowed:boolean; database:string };
-export type Permission = 'patient.create'|'task.admin'|'task.clinical'|'task.billing'|'claim.write'|'claim.release'|'receipt.write'|'staff.manage'|'export'|'audit.read'|'discharge.prepare'|'discharge.confirm'|'order.write';
+export type Permission = 'patient.create'|'task.admin'|'task.clinical'|'task.billing'|'claim.write'|'claim.release'|'receipt.write'|'staff.manage'|'export'|'audit.read'|'discharge.prepare'|'discharge.confirm'|'order.write'|'billing.read';
 const grants:Record<Permission,Role[]> = {
+  'billing.read':['agency_admin','billing','read_only'],
   'order.write':['agency_admin','intake','rn_qa','case_manager'],
   'patient.create':['agency_admin','intake'],
   'task.admin':['agency_admin','intake','case_manager'],

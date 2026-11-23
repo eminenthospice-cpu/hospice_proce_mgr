@@ -1,3 +1,5 @@
+import type {BillingCollections} from './billing-ledger.ts';
+import {emptyBilling} from './billing-ledger.ts';
 import type {SupplyOrder} from './orders.ts';
 export type GateCode = 'election' | 'addendum' | 'cti' | 'noe' | 'recert' | 'f2f' | 'poc' | 'medication' | 'days' | 'adr' | 'auth' | 'duplicate';
 export type Category = '서류' | '서명' | 'SNF' | 'Authorization' | 'ADR' | 'HOPE' | '물품' | '수납';
@@ -17,7 +19,7 @@ export type Remittance = { id: string; patientId: string; claimId: string; date:
 export type DCMonth = { month: number; total: number | null; death: number | null; live: number | null; closed: boolean };
 export type DischargeReview = { id: string; patientId: string; reason: string; checks: boolean[]; references: string[]; confirmed: boolean };
 export type AuditEvent = { id: string; at: string; action: string; entity: string; detail: string; actor: string };
-export type AppState = { schemaVersion: 1; referenceDate: string; patients: Patient[]; orders: SupplyOrder[]; tasks: Task[]; claims: Claim[]; remittances: Remittance[]; dcMonths: DCMonth[]; discharges: DischargeReview[]; audit: AuditEvent[] };
+export type AppState = BillingCollections & { schemaVersion: 1; referenceDate: string; patients: Patient[]; orders: SupplyOrder[]; tasks: Task[]; claims: Claim[]; remittances: Remittance[]; dcMonths: DCMonth[]; discharges: DischargeReview[]; audit: AuditEvent[] };
 
 export const RULE_VERSION = '기획서 v1.0 · 2026.11';
 export const gateDefinitions: { code: GateCode; label: string; description: string; basis: string }[] = [
@@ -150,7 +152,7 @@ export function initialState(): AppState {
   tasks.push({ id: 't19', patientId: 'p2', title: 'NOE MAC 접수 확인', category: '서류', lane: 'admin', due: '2026-11-20', owner: '박지민', status: 'complete', evidence: { reference: 'DEMO-MAC-88213', recordedAt: '2026-11-20T19:00:00Z' } });
   const claims: Claim[] = [1, 2, 3, 7, 5, 6, 8, 10].map((n, i) => ({ id: `C-${1041 + i}`, patientId: `p${n}`, from: patients[n - 1].admissionDate < '2026-11-01' ? '2026-11-01' : patients[n - 1].admissionDate, to: '2026-11-22', expected: [642000, 588000, 410000, 621000, 588000, 642000, 420000, 588000][i], status: i > 5 ? 'submitted' : 'draft' }));
   return {
-    schemaVersion: 1, referenceDate: '2026-11-22', patients, tasks, claims,
+    ...emptyBilling(), schemaVersion: 1, referenceDate: '2026-11-22', patients, tasks, claims,
     remittances: [
       { id: 'EFT-DEMO-0412', patientId: 'p8', claimId: 'C-1047', date: '2026-11-20', expected: 642000, billed: 642000, allowed: 620000, paid: 607600, contractual: 22000, responsibility: 12400, reason: '조정·책임액 확인', reconciled: false },
       { id: 'EFT-DEMO-0413', patientId: 'p10', claimId: 'C-1048', date: '2026-11-20', expected: 588000, billed: 588000, allowed: 588000, paid: 588000, contractual: 0, responsibility: 0, reason: '', reconciled: true },

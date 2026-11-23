@@ -145,3 +145,42 @@ test('ORDERS API: encrypted persistence, scoped reads, least privilege, recent M
   assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='order.auditDemo'").get()!.n,1);
  }finally{db.close();}
 });
+
+test('LEDGER API: encrypted append-only records and financial access are enforced',async()=>{
+ const {db,env,owner}=fixture();try{
+  await enroll(env,owner);await command(env,owner,{type:'samples.census'});const before=await call(env,owner,'/api/workspace');
+  const seeded=await command(env,owner,{type:'samples.billing'});assert.equal(seeded.status,200);assert.equal(seeded.body.data.billingWorksheets.length,38);assert.equal(seeded.body.data.billedClaims.length,12);
+  assert.deepEqual(seeded.body.data.patients,before.body.data.patients);assert.deepEqual(seeded.body.data.tasks,before.body.data.tasks);
+  assert.equal((await command(env,owner,{type:'samples.billing'})).status,409);
+  const raw=db.sqlite.prepare("SELECT ciphertext FROM records WHERE kind='billedClaims' LIMIT 1").get()!;assert.ok(!String(raw.ciphertext).includes('DEMO-CLAIM'));
+  const viewer=await staff(env,owner,'Financial reviewer','read_only');assert.equal((await call(env,viewer,'/api/workspace')).body.data.billedClaims.length,12);assert.equal((await command(env,viewer,{type:'billing.claim',claim:{id:'forbidden-claim',patientId:seeded.body.data.patients[0].id,reference:'DEMO-QA',from:'2026-11-23',to:'2026-11-23',billed:1000}})).status,403);
+  for(const [name,role] of [['Clinical reviewer','rn_qa'],['Intake reviewer','intake'],['Assigned physician','physician']]){const staffMember=await staff(env,owner,name,role);const filtered=await call(env,staffMember,'/api/workspace');for(const key of ['billingWorksheets','pharmacyCharges','billedClaims','paymentBatches'])assert.deepEqual(filtered.body.data[key],[]);}
+ }finally{db.close();}
+});
+test('LEDGER API: reviewed import rejects real sources in demo mode, preserves missing amounts and deduplicates source rows',async()=>{
+ const {db,env,owner}=fixture();owner.locale='en';try{
+  await enroll(env,owner);await command(env,owner,{type:'samples.census'});const seeded=await command(env,owner,{type:'samples.billing'});const row={...seeded.body.data.billingWorksheets[0],id:'qa-import-row',source:{file:'DEMO-Billing.xls',hash:'qa-import-hash',row:2,synthetic:true}};
+  const real=await command(env,owner,{type:'billing.import',worksheets:[{...row,source:{...row.source,file:'Billing_October.xls',synthetic:false}}],pharmacy:[]});assert.equal(real.status,423);assert.doesNotMatch(real.body.error.message,/[가-힣]/);
+  const v=seeded.body.version,requestId=crypto.randomUUID(),cmd={type:'billing.import',worksheets:[row],pharmacy:[]};const result=await command(env,owner,cmd,v,requestId);assert.equal(result.status,200);assert.equal(result.body.data.billingWorksheets.length,39);
+  assert.equal((await command(env,owner,cmd,v,requestId)).status,200);assert.equal((await command(env,owner,cmd)).body.data.billingWorksheets.length,39);
+  assert.equal((await command(env,owner,{...cmd,worksheets:[{...row,patientName:'DO NOT STORE'}]})).status,422);
+  const reloaded=await call(env,owner,'/api/workspace');assert.equal(reloaded.body.data.billedClaims.find((c:{reference:string})=>c.reference==='DEMO-CLAIM-012').billed,null);
+ }finally{db.close();}
+});
+test('LEDGER API: payer advice does not confirm cash; positive bank matching requires recent MFA and exact totals',async()=>{
+ const {db,env,owner}=fixture();try{
+  const enrollment=await enroll(env,owner);await command(env,owner,{type:'samples.census'});const seeded=await command(env,owner,{type:'samples.billing'});const batch=seeded.body.data.paymentBatches.find((b:{reference:string})=>b.reference==='DEMO-RA-9');
+  assert.equal(batch.bank,undefined);const cmd={type:'billing.bank',batchId:batch.id,date:batch.date,amount:batch.netPayment,reference:'DEMO-QA-BANK',confirmed:true};
+  const zero=seeded.body.data.paymentBatches.find((b:{netPayment:number})=>b.netPayment===0);assert.equal((await command(env,owner,{...cmd,batchId:zero.id,amount:0})).status,409);
+  assert.equal((await command(env,owner,{...cmd,amount:batch.netPayment-1})).status,422);
+  db.sqlite.prepare('UPDATE sessions SET verified_at=?').run(Date.now()-301000);assert.equal((await command(env,owner,cmd)).status,428);
+  assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:enrollment.codes[0]})).status,200);
+  const matched=await command(env,owner,cmd);assert.equal(matched.status,200);assert.equal(matched.body.data.paymentBatches.find((b:{id:string})=>b.id===batch.id).bank.amount,batch.netPayment);
+  assert.equal((await command(env,owner,cmd)).status,409);
+  const priorClaim=seeded.body.data.billedClaims.find((c:{reference:string})=>c.reference==='DEMO-CLAIM-010');
+  const newBatch={id:'qa-ra',reference:'DEMO-QA-RA',date:seeded.body.data.referenceDate,trace:'DEMO-QA-TRACE',method:'ACH',netPayment:100000,providerAdjustment:0,source:{file:'DEMO-QA.835',hash:'qa-era',row:1,synthetic:true},lines:[{id:'qa-line',patientId:priorClaim.patientId,controlNumber:priorClaim.reference,payerClaimNumber:'DEMO-QA-ICN',from:priorClaim.from,to:priorClaim.to,billed:priorClaim.billed,paid:100000,responsibility:0,adjustments:[],remarks:[],status:'1'}]};
+  const imported=await command(env,owner,{type:'billing.remit',batch:newBatch});assert.equal(imported.status,200);assert.equal(imported.body.data.paymentBatches.find((b:{id:string})=>b.id==='qa-ra').bank,undefined);
+  assert.equal((await command(env,owner,{type:'billing.remit',batch:{...newBatch,id:'qa-ra-duplicate',reference:'DEMO-OTHER-RA',trace:'DEMO-OTHER-TRACE',source:{...newBatch.source,hash:'other-era'}}})).status,409);
+  assert.deepEqual(imported.body.data.claims,seeded.body.data.claims);assert.deepEqual(imported.body.data.patients,seeded.body.data.patients);
+ }finally{db.close();}
+});

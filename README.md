@@ -2,6 +2,21 @@
 
 Next.js 15 / React 19 UI와 서버 API를 단일 Cloudflare Worker로 빌드합니다. 배포 대상은 `https://mgr.eminenthospice.com`이며, 직원 인증은 Cloudflare Access, 업무 권한·MFA·암호화 레코드는 기관 전용 Cloudflare D1으로 관리합니다.
 
+## v1.3.0 · 환자별 빌링 / 지급명세 / 은행 대조
+
+Finance의 **환자별 빌링 내역**과 **지급명세·미수금**에서 월별 청구 의뢰자료, 실제 외부 청구 기록, 약국 내역, Remittance Advice와 실제 은행 대조를 연결합니다. 환자 360의 빌링 버튼은 해당 환자로 필터합니다. 기존 청구 게이트와 수납 기록은 보존하며 이 기능이 임상 게이트를 통과시키거나 외부 청구를 전송하지 않습니다.
+
+- 기존 Billing `.xls`의 `PATIENT` 셀에서 MR#를 분리하고 POS, Care Day 원문, Payer, R&B, MD/RN/LVN/HA/SW/SW Phone/SC 방문 원문과 Notes/Auth를 가져옵니다. 반복된 MR# 행을 자동 병합하지 않습니다. 의뢰자료에는 청구 금액·제출 증빙이 없으므로 실제 청구 기록과 구분합니다. 미기재 금액은 `null`이며 0으로 대체하지 않습니다.
+- Pharm 1–4의 `.xls`/`.xlsx` 열 제목을 인식합니다. 같은 묶음의 Billing 명단으로 약국 이름을 연결하고, 모호하거나 미연결된 항목만 확인합니다. 전체 환자명·DOB·의사명·MBI 필드는 저장하지 않습니다. 이름 연결표는 브라우저 메모리에서만 사용합니다. 원본 파일은 서버에 업로드하거나 브라우저 저장소에 보관하지 않습니다.
+- 청구자료 월과 Rx Date는 구분합니다. Excel 일시의 시각 부분을 버려 날짜 경계에서 다음 날로 반올림하지 않습니다. 날짜 오류는 원본 확인 후 해당 행만 보정하고 원본 날짜 값·파일 지문·행 번호를 함께 보존합니다. RxRetail, Price, PatPay는 구분하며 Medicare 지급액이나 환자 미수금에 합산하지 않습니다.
+- X12 ERA/835는 Patient Control Number, payer claim number, statement dates, CLP, CAS, RARC, BPR/TRN과 PLB 합계를 읽습니다. 환자명·MBI·은행 계좌 정보는 가져오지 않습니다. 기존 청구 참조가 일치하면 자동 연결하며 신규 청구는 환자번호 확인 후 명세 기반으로 생성합니다. 청구 금액이 기존 기록과 다르면 확인 필요 상태로 표시합니다.
+- 스캔 PDF OCR은 구현하지 않습니다. SPR 검토 입력에서 헤더를 한 번 입력하고 여러 기존 청구를 추가합니다. 환자·기간·기재된 금액은 재사용하며 원본 PDF 자체를 보관하지 않습니다. 원본 filename/hash를 기록해 직원이 보관한 원본을 대조합니다.
+- 거절, 부분 지급, 지급 결정/입금 미확인, 조정, 상계, 대조 완료, 금액 확인 필요를 구분합니다. CARC/Group, RARC와 Patient Responsibility를 분리하며 PR을 두 번 더하지 않습니다. `sum(claim payments) - PLB = net provider payment`를 검증합니다. 양수·균형 명세만 최근 MFA 후 실제 은행 금액·일자·참조 확인을 기록할 수 있습니다. 0원 거절은 입금 완료가 되지 않습니다.
+- Admin/Billing만 편집하며 Admin/Billing/Read-only만 새 금융 내역을 조회합니다. 암호화 D1 기록·CAS·중복 요청 보호·감사 로그를 사용합니다. 파일/원본 행과 지급명세/EFT/은행 참조 중복을 방지합니다. 새 원격 DB 마이그레이션과 암호화 키 변경은 없습니다.
+- 실제 자료는 현 `PHI_PROCESSING_APPROVED=false`에서 로컬 미리보기만 허용하고 저장을 차단합니다. DEMO- 파일·가상 환자만 저장합니다. 가상 빌링 팩은 기존 Census 환자에 월별 행, 약국 24행, 청구 12건, 지급명세 9건을 보존적으로 추가하며 Admin와 최근 MFA가 필요합니다.
+
+지원 범위: Excel 파일 최대 5 MB, 묶음 10개/1,500행, 명령별 40행 저장; ERA 최대 2 MB/20 transactions/transaction당 60 claims. 청구별 statement date가 없는 파일, 역분개·debit, 이미 지급 기록이 있는 청구의 추가 지급·정정은 별도 조정 검토가 필요하며 자동 합산하지 않습니다. 은행 연동·자동 입금 검증과 PLB 상세 사유 원장 기능은 포함하지 않습니다. 새 컬렉션 저장 후 롤백 대상은 `billingWorksheets`, `pharmacyCharges`, `billedClaims`, `paymentBatches`를 읽을 수 있어야 합니다.
+
 ## v1.2.0 · DME / Medication 주문현황
 
 Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자번호로 업체 요청과 배송을 추적합니다. 원본 처방·POC는 기존 EHR에서 유지하며 처방·투약·외부 업체 전송 기능은 없습니다. HospiceMD를 호출하거나 변경하지 않습니다. CMS의 **Durable Medical Equipment (DME), Drugs and Biologicals, Medical Supplies** 용어를 사용하며 요청·배송 상태는 내부 관리용입니다.

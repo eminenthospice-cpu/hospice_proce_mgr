@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0 — 2026-11-23
+
+- Add patient billing history linked to monthly Billing and four pharmacy workbook layouts, with local preview, embedded MR# matching, in-memory pharmacy name mapping and exceptions-only review.
+- Preserve repeated patient rows, original visit entries, missing versus zero amounts, source row fingerprints and corrected/original prescription dates. Keep invoice month separate from prescription date and RxRetail/Price/PatPay separate from Medicare receivables.
+- Add billed claim records, ERA/835 import, reviewed multi-claim SPR entry, denial/partial/adjusted/offset/payment-reported states and separate bank deposit matching. Scanned PDF OCR and automatic bank integration are not included.
+- Preserve source adjustments, CARC/Group and RARC, prevent PR double counting, validate PLB/net totals, block zero-value deposit matching and require recent MFA for bank evidence.
+- Encrypt all new records, restrict financial reads/edits, enforce PHI restrictions, duplicate guards, versioned commands and audit records. Existing clinical gates, patients, tasks and receipts are preserved.
+- 57 automated checks and production build passed. Desktop/mobile QA verified local Excel matching, persisted pharmacy import, 835 mapping/payment state, multi-claim zero-payment denial entry and bank reconciliation. Actual private workbooks were read locally for parser compatibility; no patient records were uploaded.
+
 ## v1.2.0 — 2026-11-23
 
 - Add dedicated DME and Medication order queues using CMS benefit terminology in Korean and English.

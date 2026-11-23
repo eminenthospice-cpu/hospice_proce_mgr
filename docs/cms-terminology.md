@@ -21,3 +21,10 @@ Maintain canonical labels in `locales/en.json` and corresponding Korean explanat
 ## DME and medication coordination (v1.2.0)
 
 Use **Durable Medical Equipment (DME)**, **Drugs and Biologicals**, and **Medical Supplies** as the CMS benefit terms. Source: [Medicare Benefit Policy Manual, Chapter 9, §40.1.6](https://www.cms.gov/manuals/downloads/bp102c09.pdf). Queue statuses such as request recorded, supplier confirmed, in transit, received, delayed and cancelled are internal operational labels, not CMS codes or coverage decisions. Receipt records logistics only; it does not establish dispensing, medication administration, prescription authorization, POC approval or medication reconciliation. Original prescribing and clinical documentation remain in the source EHR.
+
+
+## Billing reconciliation (v1.3.0)
+
+Use **Remittance Advice**, **Electronic Remittance Advice (ERA)**, **Standard Paper Remittance (SPR)**, **Electronic Funds Transfer (EFT)**, **Claim Adjustment Group Code**, **Claim Adjustment Reason Code (CARC)**, **Remittance Advice Remark Code (RARC)**, **Patient Responsibility**, and **Provider Level Balance (PLB)**. Source: [CMS Health Care Payment and Remittance Advice](https://www.cms.gov/medicare/coding-billing/electronic-billing/health-care-payment-remittance-advice). The app's payment/deposit status labels are internal reconciliation states, not CMS claim status codes. Preserve the original CLP status separately.
+
+Bank matching is separate evidence from payer adjudication: [CMS EFT and ERA Reassociation Basics](https://www.cms.gov/files/document/eft-and-era-payment-remittance-reassociation-basics.pdf). The 835 reader uses the public [CMS 5010 flat-file mapping](https://www.cms.gov/Medicare/Billing/ElectronicBillingEDITrans/Downloads/835-Flatfile.pdf) for BPR/TRN, CLP/CAS and statement dates. Unsupported reversals and repeat adjudications are retained for separate review rather than silently posted or summed.
