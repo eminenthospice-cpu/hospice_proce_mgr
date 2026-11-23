@@ -115,3 +115,33 @@ test('CENSUS API: admin MFA, append-only data, duplicate protection and audit lo
   assert.equal((await command(env,owner,{type:'samples.census',patients:[]})).status,422);
  }finally{db.close();}
 });
+
+test('ORDERS API: encrypted persistence, scoped reads, least privilege, recent MFA seed and duplicate protection',async()=>{
+ const {db,env,owner}=fixture();owner.locale='en';try{
+  const enrolled=await enroll(env,owner);await command(env,owner,{type:'samples.census'});
+  const original=await call(env,owner,'/api/workspace');assert.deepEqual(original.body.data.orders,[]);
+  db.sqlite.prepare('UPDATE sessions SET verified_at=?').run(Date.now()-301000);
+  assert.equal((await command(env,owner,{type:'samples.orders'})).status,428);
+  assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:enrolled.codes[0]})).status,200);
+  const requestId=crypto.randomUUID(),version=original.body.version;
+  const seeded=await command(env,owner,{type:'samples.orders'},version,requestId);assert.equal(seeded.status,200);assert.equal(seeded.body.data.orders.length,24);
+  assert.deepEqual(seeded.body.data.patients,original.body.data.patients);
+  assert.equal((await command(env,owner,{type:'samples.orders'},version,requestId)).status,200);
+  assert.equal((await command(env,owner,{type:'samples.orders'})).status,409);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE kind='orders'").get()!.n,24);
+  const order=seeded.body.data.orders.find((o:{status:string})=>o.status==='requested');
+  const raw=db.sqlite.prepare("SELECT ciphertext FROM records WHERE kind='orders' AND id=?").get(order.id)!;
+  assert.ok(!String(raw.ciphertext).includes(order.item));assert.ok(!String(raw.ciphertext).includes(order.supplier));
+  const viewer=await staff(env,owner,'Order viewer','read_only');assert.equal((await command(env,viewer,{type:'order.status',orderId:order.id,status:'received'})).status,403);
+  const physician=await staff(env,owner,'Order physician','physician');assert.equal((await call(env,physician,'/api/workspace')).body.data.orders.length,0);
+  db.sqlite.prepare('UPDATE members SET patient_ids=? WHERE email=?').run(JSON.stringify([order.patientId]),physician.email);
+  const scoped=await call(env,physician,'/api/workspace');assert.ok(scoped.body.data.orders.length>0);assert.ok(scoped.body.data.orders.every((o:{patientId:string})=>o.patientId===order.patientId));
+  const intake=await staff(env,owner,'Order coordinator','intake');
+  // Routine status changes must not require a new MFA prompt for each click.
+  db.sqlite.prepare('UPDATE sessions SET verified_at=?').run(Date.now()-301000);
+  const updated=await command(env,intake,{type:'order.status',orderId:order.id,status:'received'});assert.equal(updated.status,200);
+  const reloaded=await call(env,owner,'/api/workspace');assert.equal(reloaded.body.data.orders.find((o:{id:string})=>o.id===order.id).status,'received');
+  assert.deepEqual(reloaded.body.data.patients,original.body.data.patients);assert.equal((await command(env,intake,{type:'order.status',orderId:order.id,status:'confirmed'})).status,409);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='order.auditDemo'").get()!.n,1);
+ }finally{db.close();}
+});

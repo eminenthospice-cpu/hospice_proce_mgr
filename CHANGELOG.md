@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0 — 2026-11-23
+
+- Add dedicated DME and Medication order queues using CMS benefit terminology in Korean and English.
+- Reuse existing patients, recent suppliers and refill details; automatically record dates, owners and status history. Receipt takes one click; intermediate updates are optional and only exceptions require notes.
+- Append 12 fictional DME and 12 fictional medication orders to existing census demo patients without replacing records. Admin and recent MFA are required; duplicate packs are rejected.
+- Enforce server-side coordination permissions, patient scope, encrypted storage, CAS/idempotency and audit logging. Receipt does not change clinical evidence or billing gates. No prescribing, order transmission or HospiceMD access/write integration.
+- Validate with 43 automated checks, production build, and desktop/mobile UI checks for both languages, append, status changes, exception notes and refill reuse.
+
 ## v1.1.1 — 2026-11-23
 
 - Added an administrator-only 38-patient synthetic census demo with recent MFA, duplicate prevention, atomic append, and a dedicated patient-list filter. Existing patients and workflow records are preserved.

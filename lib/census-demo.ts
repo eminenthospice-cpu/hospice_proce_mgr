@@ -36,5 +36,5 @@ export function createCensusDemo(today: string, owner: string): AppState {
     if(pending) { const [title,category,lane]=labels[pending]!; tasks.push({id:`demo-hmd-t${serial}`,patientId:id,title,category,lane,gateCode:pending,due:addDays(today,random(-3,7)),owner,status:'todo',note:'가상 시나리오입니다. 원본 환자의 서류·인증 상태가 아닙니다.'}); }
     if(i<8) tasks.push({id:`demo-hmd-period${serial}`,patientId:id,title:'누적 Benefit period 이력 확인',category:'서류',lane:'admin',due:addDays(today,random(0,5)),owner,status:'todo',note:'가상 시나리오입니다. 원본 환자의 서류·인증 상태가 아닙니다.'});
   }
-  return {schemaVersion:1,referenceDate:today,patients,tasks,claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};
+  return {schemaVersion:1,referenceDate:today,patients,tasks,orders:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};
 }

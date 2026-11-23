@@ -1,3 +1,4 @@
+import {orderStatuses, nextOrderStatus, orderClosed, createOrderDemo, ORDER_DEMO_PREFIX} from '../lib/orders.ts';
 import { z } from 'zod';
 import { addDays, isDate, evaluateGate, validateEvidence, canReconcile, laToday, initialState, newId, type AppState, type Patient, type Task, type Evidence } from '../lib/domain.ts';
 import { can, type Actor, type Permission } from '../lib/permissions.ts';
@@ -23,13 +24,16 @@ export const commandSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('audit.record'),event:z.enum(['patient.view','export']),patientId:id.optional(),report:z.string().max(80).optional()}).strict(),
   z.object({type:z.literal('samples.load')}).strict(),
   z.object({type:z.literal('samples.census')}).strict(),
+  z.object({type:z.literal('samples.orders')}).strict(),
+  z.object({type:z.literal('order.create'),order:z.object({id,patientId:id,kind:z.enum(['dme','medication']),item:text,supplier:text,reference:z.string().trim().max(120),neededBy:date}).strict()}).strict(),
+  z.object({type:z.literal('order.status'),orderId:id,status:z.enum(orderStatuses),reason:z.string().trim().max(200).optional()}).strict(),
 ]);
 export type Command=z.infer<typeof commandSchema>;
-export function emptyWorkspace():AppState{return {schemaVersion:1,referenceDate:laToday(),patients:[],tasks:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};}
+export function emptyWorkspace():AppState{return {schemaVersion:1,referenceDate:laToday(),patients:[],orders:[],tasks:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};}
 function requirePermission(actor:Actor,p:Permission){assert(can(actor.roles,p),403,'forbidden','현재 직원 역할에는 이 작업 권한이 없습니다.');}
 export function canSeePatient(actor:Actor,patientId:string){return actor.roles.some(r=>r!=='physician')||actor.patientIds.includes(patientId);}
 function visiblePatient(actor:Actor,state:AppState,id:string){const p=state.patients.find(p=>p.id===id);assert(p&&canSeePatient(actor,id),404,'not_found','환자를 찾을 수 없습니다.');return p;}
-function uniqueId(state:AppState,id:string){assert(![...state.patients,...state.tasks,...state.claims,...state.remittances,...state.discharges].some(x=>x.id===id),409,'duplicate_id','이미 사용된 참조번호입니다.');}
+function uniqueId(state:AppState,id:string){assert(![...state.patients,...state.orders,...state.tasks,...state.claims,...state.remittances,...state.discharges].some(x=>x.id===id),409,'duplicate_id','이미 사용된 참조번호입니다.');}
 export function admissionTasks(p:Patient):Task[]{
  const rows:[string,Task['lane'],number,Task['category'],Task['gateCode']?][]=[['H&P 출처·작성자 확인','clinical',1,'서류'],['RN 초기 방문 수령 확인','clinical',2,'서류'],['포괄평가 완료 확인','clinical',5,'서류'],['오더·복약 대조','clinical',2,'서류','medication'],['선택 진술서 서명 확인','admin',0,'서류','election'],['동의서 별도 수령 확인','admin',0,'서류'],['NOE MAC 접수 확인','admin',5,'서류','noe'],['CTI 구두 인증 확보 확인','clinical',2,'서명'],['서면 CTI 서명 수령','clinical',2,'서명','cti'],['POC 승인·서명 확인','clinical',0,'서명','poc']];
  if(p.electionDate>='2026-10-01')rows.push(['Addendum 제공·수령 확인','admin',5,'서류','addendum']);
@@ -38,7 +42,7 @@ export function admissionTasks(p:Patient):Task[]{
  return rows.map(([title,lane,days,category,gateCode])=>({id:newId('task'),patientId:p.id,title,lane,category,gateCode,due:addDays(gateCode==='noe'||gateCode==='addendum'?p.electionDate:['cti','f2f','recert'].includes(gateCode||'')?p.periodStart:p.admissionDate,days),owner:p.owner,status:'todo',note:gateCode==='cti'?'청구 제출 전 서면 확보 필수. 표시일은 사무실 확인 목표일입니다.':title.startsWith('RN 초기')?'정확한 48시간 이행은 원본 EHR에서 확인하세요.':undefined}));
 }
 export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAllowed=false,now=new Date()):{state:AppState;action:string;entity:string;detail:string}{
- const state=structuredClone(before),today=laToday();state.referenceDate=today;
+ const state=structuredClone(before),today=laToday();state.orders??=[];state.referenceDate=today;
  let action='',entity='',detail='서버 검증 후 처리';
  switch(command.type){
   case 'patient.create':{
@@ -93,10 +97,33 @@ export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAll
    else {assert(command.patientId,422,'patient_required','환자 참조가 필요합니다.');visiblePatient(actor,state,command.patientId);action='환자 조회';entity=command.patientId;}
    break;
   }
+  case 'order.create':{
+   requirePermission(actor,'order.write');const input=command.order,p=visiblePatient(actor,state,input.patientId);uniqueId(state,input.id);
+   assert(p.status!=='discharged',409,'invalid_state','order.patientDischarged');
+   assert(phiAllowed||p.number.startsWith('DEMO-'),423,'phi_not_approved','order.demoOnly');
+   assert(!state.orders.some(o=>o.patientId===p.id&&o.kind===input.kind&&o.item.toLowerCase()===input.item.toLowerCase()&&!orderClosed(o)),409,'duplicate_order','order.duplicate');
+   const at=now.toISOString();state.orders.push({...input,owner:actor.name,status:'requested',createdAt:at,updatedAt:at,history:[{status:'requested',at,by:actor.name}]});
+   action='order.auditCreated';entity=input.id;detail='order.auditTrackingOnly';break;
+  }
+  case 'order.status':{
+   requirePermission(actor,'order.write');const o=state.orders.find(o=>o.id===command.orderId);assert(o,404,'not_found','order.notFound');const p=visiblePatient(actor,state,o.patientId);
+   assert(phiAllowed||p.number.startsWith('DEMO-'),423,'phi_not_approved','order.demoOnly');
+   assert(!orderClosed(o)&&([nextOrderStatus(o.status),'received','delayed','cancelled'].includes(command.status))&&o.status!==command.status,409,'invalid_transition','order.invalidTransition');
+   assert(!['delayed','cancelled'].includes(command.status)||command.reason?.trim(),422,'reason_required','order.reasonRequired');
+   o.status=command.status;o.updatedAt=now.toISOString();o.history.push({status:o.status,at:o.updatedAt,by:actor.name,...(command.reason?{reason:command.reason}:{})});
+   action='order.auditStatus';entity=o.id;detail='order.auditTrackingOnly';break;
+  }
+  case 'samples.orders':{
+   requirePermission(actor,'staff.manage');assert(!phiAllowed,423,'demo_only','가상 데이터는 검증 환경에서만 추가할 수 있습니다.');
+   assert(!state.orders.some(o=>o.id.startsWith(ORDER_DEMO_PREFIX)),409,'already_exists','order.demoExists');
+   assert(state.patients.filter(p=>p.number.startsWith(CENSUS_DEMO_PREFIX)).length>=12,409,'demo_patients_required','order.demoPatientsRequired');
+   const demo=createOrderDemo(state.patients,today);for(const o of demo)uniqueId(state,o.id);state.orders.push(...demo);
+   action='order.auditDemo';entity='demo-orders';detail='order.auditDemoDetail';break;
+  }
   case 'samples.census':{
    requirePermission(actor,'staff.manage');assert(!phiAllowed,423,'demo_only','가상 데이터는 검증 환경에서만 추가할 수 있습니다.');
    assert(!state.patients.some(p=>p.number.startsWith(CENSUS_DEMO_PREFIX)),409,'already_exists','이 가상 데모는 이미 추가되어 있습니다.');
-   const demo=createCensusDemo(today,actor.name),oldIds=new Set([...state.patients,...state.tasks,...state.claims,...state.remittances,...state.discharges].map(r=>r.id));
+   const demo=createCensusDemo(today,actor.name),oldIds=new Set([...state.patients,...state.orders,...state.tasks,...state.claims,...state.remittances,...state.discharges].map(r=>r.id));
    assert([...demo.patients,...demo.tasks].every(r=>!oldIds.has(r.id)),409,'duplicate_id','이미 사용된 참조번호입니다.');
    state.patients.push(...demo.patients);state.tasks.push(...demo.tasks);
    action='가상 Census 데모 추가';entity='demo-hmd-census';detail='가상 환자 38명 · 원본 환자 연결 없음 · 기존 데이터 유지';break;

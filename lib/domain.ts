@@ -1,3 +1,4 @@
+import type {SupplyOrder} from './orders.ts';
 export type GateCode = 'election' | 'addendum' | 'cti' | 'noe' | 'recert' | 'f2f' | 'poc' | 'medication' | 'days' | 'adr' | 'auth' | 'duplicate';
 export type Category = '서류' | '서명' | 'SNF' | 'Authorization' | 'ADR' | 'HOPE' | '물품' | '수납';
 export type Lane = 'admin' | 'clinical' | 'billing';
@@ -16,7 +17,7 @@ export type Remittance = { id: string; patientId: string; claimId: string; date:
 export type DCMonth = { month: number; total: number | null; death: number | null; live: number | null; closed: boolean };
 export type DischargeReview = { id: string; patientId: string; reason: string; checks: boolean[]; references: string[]; confirmed: boolean };
 export type AuditEvent = { id: string; at: string; action: string; entity: string; detail: string; actor: string };
-export type AppState = { schemaVersion: 1; referenceDate: string; patients: Patient[]; tasks: Task[]; claims: Claim[]; remittances: Remittance[]; dcMonths: DCMonth[]; discharges: DischargeReview[]; audit: AuditEvent[] };
+export type AppState = { schemaVersion: 1; referenceDate: string; patients: Patient[]; orders: SupplyOrder[]; tasks: Task[]; claims: Claim[]; remittances: Remittance[]; dcMonths: DCMonth[]; discharges: DischargeReview[]; audit: AuditEvent[] };
 
 export const RULE_VERSION = '기획서 v1.0 · 2026.11';
 export const gateDefinitions: { code: GateCode; label: string; description: string; basis: string }[] = [
@@ -155,6 +156,7 @@ export function initialState(): AppState {
       { id: 'EFT-DEMO-0413', patientId: 'p10', claimId: 'C-1048', date: '2026-11-20', expected: 588000, billed: 588000, allowed: 588000, paid: 588000, contractual: 0, responsibility: 0, reason: '', reconciled: true },
       { id: 'EFT-DEMO-0414', patientId: 'p4', claimId: 'C-DEMO-1039', date: '2026-11-19', expected: 410000, billed: 410000, allowed: 410000, paid: 205000, contractual: 0, responsibility: 0, reason: 'partial', reconciled: false },
     ],
+    orders: [],
     dcMonths: [[10,7,3],[16,8,8],[9,7,2],[9,7,2],[9,7,2],[10,7,3],[7,5,2],[6,5,1],[7,6,1],[6,5,1],[null,null,null],[null,null,null]].map((r, i) => ({ month: i + 1, total: r[0], death: r[1], live: r[2], closed: i < 10 })),
     discharges: [{ id: 'dc1', patientId: 'p24', reason: 'revocation', checks: [true, true, false, false], references: ['DEMO-RN-1120', 'DEMO-ORDER-221', '', ''], confirmed: false }, { id: 'dc2', patientId: 'p27', reason: 'transferred', checks: [true, false, false, false], references: ['DEMO-RN-1121', '', '', ''], confirmed: false }],
     audit: [

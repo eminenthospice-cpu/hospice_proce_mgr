@@ -16,3 +16,8 @@ The UI uses the provider-facing ERA / SPR terminology instead of treating EOB as
 Administrative owners, Intake/RN-QA staff roles, workstreams, claim preparation batches, review statuses, and the locally calculated live discharge rate are internal workflow concepts. They are not CMS adjudication statuses, official adjustment codes, or an official CMS quality measure. The remittance follow-up reason selector does not record CARC/RARC codes; staff must consult the original remittance advice. The app does not generate an 835, 837I, NOE transaction, or a HOPE submission.
 
 Maintain canonical labels in `locales/en.json` and corresponding Korean explanations in `locales/ko.json`. The linked in-app reference is defined in `lib/cms-terminology.ts`. Do not localize stored enums or change clinical validation rules as part of a terminology edit.
+
+
+## DME and medication coordination (v1.2.0)
+
+Use **Durable Medical Equipment (DME)**, **Drugs and Biologicals**, and **Medical Supplies** as the CMS benefit terms. Source: [Medicare Benefit Policy Manual, Chapter 9, §40.1.6](https://www.cms.gov/manuals/downloads/bp102c09.pdf). Queue statuses such as request recorded, supplier confirmed, in transit, received, delayed and cancelled are internal operational labels, not CMS codes or coverage decisions. Receipt records logistics only; it does not establish dispensing, medication administration, prescription authorization, POC approval or medication reconciliation. Original prescribing and clinical documentation remain in the source EHR.

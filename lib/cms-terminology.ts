@@ -1,6 +1,7 @@
 // Presentation glossary reviewed against CMS sources on 2026-11-23.
 // Internal role codes, categories and workflow states are not Medicare codes.
 export const cmsTerminology = [
+  ...['cms.term.dme','cms.term.drugsBiologicals','cms.term.medicalSupplies'].map(key=>({key,source:'https://www.cms.gov/manuals/downloads/bp102c09.pdf'})),
   {
     "key": "cms.term.benefitPeriod",
     "source": "https://www.cms.gov/Regulations-and-Guidance/Guidance/Manuals/downloads/bp102c09.pdf"

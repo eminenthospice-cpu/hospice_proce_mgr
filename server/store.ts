@@ -24,7 +24,7 @@ export async function readWorkspace(env:Env,agencyId:string){
  const result=await env.DB.prepare('SELECT kind,id,ciphertext FROM records WHERE agency_id = ? LIMIT 5001').bind(agencyId).all<{kind:string;id:string;ciphertext:string}>();
  assert(result.results.length<=5000,503,'workspace_limit','데이터 조회 한도에 도달했습니다. 페이지 단위 조회를 적용해야 합니다.');
  const state=emptyWorkspace();
- const collections=['patients','tasks','claims','remittances','dcMonths','discharges'] as const;
+ const collections=['patients','tasks','claims','remittances','dcMonths','discharges','orders'] as const;
  await Promise.all(result.results.map(async row=>{assert(collections.includes(row.kind as typeof collections[number]),500,'invalid_record','잘못된 데이터 유형입니다.');const value=await decrypt<never>(row.ciphertext,env.DATA_ENCRYPTION_KEY,`${agencyId}:${row.kind}:${row.id}`);(state[row.kind as typeof collections[number]] as unknown[]).push(value);}));
  state.patients.sort((a,b)=>b.admissionDate.localeCompare(a.admissionDate));state.tasks.sort((a,b)=>a.due.localeCompare(b.due));state.dcMonths.sort((a,b)=>a.month-b.month);
  state.referenceDate=laToday();return {state,version:agency.version};
@@ -43,13 +43,13 @@ export async function auditRows(env:Env,actor:Actor):Promise<AuditEvent[]>{
 }
 export async function filteredState(env:Env,actor:Actor,state:AppState){
  const s=structuredClone(state);s.patients=s.patients.filter(p=>canSeePatient(actor,p.id)).map(p=>({...p,name:''}));const ids=new Set(s.patients.map(p=>p.id));
- s.tasks=s.tasks.filter(t=>ids.has(t.patientId));s.claims=s.claims.filter(t=>ids.has(t.patientId));s.remittances=s.remittances.filter(t=>ids.has(t.patientId));s.discharges=s.discharges.filter(t=>ids.has(t.patientId));
+ s.orders=s.orders.filter(o=>ids.has(o.patientId));s.tasks=s.tasks.filter(t=>ids.has(t.patientId));s.claims=s.claims.filter(t=>ids.has(t.patientId));s.remittances=s.remittances.filter(t=>ids.has(t.patientId));s.discharges=s.discharges.filter(t=>ids.has(t.patientId));
  if(actor.roles.every(r=>r==='physician')){s.remittances=[];s.claims=[];s.dcMonths=[];}
  s.audit=actor.roles.some(r=>r==='agency_admin'||r==='read_only')?await auditRows(env,actor):[];
  return s;
 }
 export async function commitState(env:Env,actor:Actor,before:AppState,after:AppState,version:number,requestId:string,commandHash:string,action:string,entity:string,detail:string,extraStatements:Statement[]=[]){
- const collections=['patients','tasks','claims','remittances','dcMonths','discharges'] as const;
+ const collections=['patients','tasks','claims','remittances','dcMonths','discharges','orders'] as const;
  const statements:Statement[]=[env.DB.prepare('INSERT INTO command_receipts (agency_id,request_id,member_id,version,command_hash,created_at) SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM agencies WHERE id = ? AND version = ?) AND EXISTS (SELECT 1 FROM members WHERE id = ? AND status = ?)').bind(actor.agencyId,requestId,actor.id,version+1,commandHash,new Date().toISOString(),actor.agencyId,version,actor.id,'active')];
  for(const collection of collections){
   const previous=new Map(before[collection].map(r=>['id' in r?r.id:String(r.month),JSON.stringify(r)]));

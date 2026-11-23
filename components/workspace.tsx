@@ -2,6 +2,8 @@
 import {useLocale, LanguageSwitcher, getClientLocale} from './locale-provider';
 import { useEffect, useMemo, useRef, useState, useContext, createContext, type ReactNode } from 'react';
 import { Activity, ArrowDownToLine, Bell, BookOpen, CalendarDays, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleHelp, Clock3, ClipboardCheck, ClipboardList, Download, ExternalLink, FileCheck2, FileClock, FileSignature, FileText, Heart, LayoutDashboard, ListFilter, LockKeyhole, Menu, MoreHorizontal, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, UserPlus, Users, Wallet, X, Circle, Receipt, RotateCcw, Eye, History, Leaf, Building2, Stethoscope, type LucideIcon, } from 'lucide-react';
+import OrdersWorkspace from './orders-workspace';
+import {Dialog} from './dialog';
 import ConnectedSettings from './connected-settings';
 import CmsTerminology from './cms-terminology';
 import { MfaCodeForm, type WorkspaceEnvelope } from './access';
@@ -10,7 +12,7 @@ import { commandFromDraft } from '@/lib/client-commands';
 import type { Command } from '@/server/commands';
 import { isLimitedPatientName, isSyntheticPatientName } from '@/lib/patient-privacy';
 import { type AppState, type Patient, type Task, type Claim, type Remittance, type Category, type Evidence, type GateCode, type SignerRole, type DischargeReview, initialState, gateDefinitions, addDays, dayDiff, money, monthDay, pct, dueText, dueTone, evaluateGate, validateEvidence, reconciliation, canReconcile, dcSummary, toCsv, newId, auditEvent, isDate, RULE_VERSION, } from '@/lib/domain';
-type Page = 'dashboard' | 'patients' | 'admissions' | 'signatures' | 'followups' | 'billing' | 'remittance' | 'reports' | 'audit' | 'settings';
+type Page = 'dme' | 'medications' | 'dashboard' | 'patients' | 'admissions' | 'signatures' | 'followups' | 'billing' | 'remittance' | 'reports' | 'audit' | 'settings';
 const pageInfo: Record<Page, {
     title: string;
     english: string;
@@ -20,6 +22,8 @@ const pageInfo: Record<Page, {
     patients: { title: '환자 관리', english: 'Patients', description: '환자별 서류, 서명, 업무 현황을 한곳에서 확인하세요.' },
     admissions: { title: '어드미션', english: 'Admissions', description: '임상 확인과 행정 처리를 나누어 빠짐없이 준비하세요.' },
     signatures: { title: '서명·인증', english: 'Certifications', description: 'CTI, 재인증, F2F와 POC 승인을 각각 추적합니다.' },
+    dme: {title:'order.dmeMenu',english:'Durable medical equipment',description:'order.dmeDescription'},
+    medications: {title:'order.medicationMenu',english:'Drugs and biologicals',description:'order.medicationDescription'},
     followups: { title: '팔로업', english: 'Follow-up workspace', description: '담당자와 기한이 분명한, 끊김 없는 업무 연결.' },
     billing: { title: '청구 게이트', english: 'Claims review', description: '12개 확인 항목을 통과한 청구만 제출 배치에 추가합니다.' },
     remittance: { title: '수납·미수금', english: 'Remittance advice / accounts receivable', description: '청구액부터 실제 입금까지, 차액의 이유를 확인하세요.' },
@@ -35,7 +39,7 @@ const navGroups: {
     }[];
 }[] = [
     { label: 'WORKSPACE', items: [{ id: 'dashboard', icon: LayoutDashboard }, { id: 'patients', icon: Users }, { id: 'admissions', icon: UserPlus }] },
-    { label: 'CARE OPERATIONS', items: [{ id: 'signatures', icon: FileSignature }, { id: 'followups', icon: ClipboardList }] },
+    { label: 'CARE OPERATIONS', items: [{ id: 'signatures', icon: FileSignature }, { id: 'followups', icon: ClipboardList }, {id:'dme',icon:Building2}, {id:'medications',icon:Stethoscope}] },
     { label: 'FINANCE & INSIGHTS', items: [{ id: 'billing', icon: ShieldCheck }, { id: 'remittance', icon: Wallet }, { id: 'reports', icon: TrendingUp }] },
 ];
 const categories: Category[] = ['서류', '서명', 'SNF', 'Authorization', 'ADR', 'HOPE', '물품', '수납'];
@@ -67,49 +71,6 @@ function Panel({ title, subtitle, icon: Icon, action, children, className = '' }
     className?: string;
 }) {
  const {t: tr, locale, localeTag} = useLocale(); return <section className={`panel ${className}`}><div className="panel-heading"><div className="panel-title">{Icon && <Icon size={17}/>}<h2>{tr(title)}</h2>{subtitle && <span className="count-pill">{tr(subtitle)}</span>}</div>{action}</div>{children}</section>; }
-function Dialog({ children, title, subtitle, onClose, wide = false, drawer = false }: {
-    children: ReactNode;
-    title: string;
-    subtitle?: string;
-    onClose: () => void;
-    wide?: boolean;
-    drawer?: boolean;
-}) {
- const {t: tr, locale, localeTag} = useLocale();
-    const ref = useRef<HTMLDivElement>(null);
-    const closeRef = useRef(onClose);
-    closeRef.current = onClose;
-    useEffect(() => {
-        const prev = document.activeElement as HTMLElement | null;
-        const get = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]') || []);
-        get()[0]?.focus();
-        const key = (e: KeyboardEvent) => {
-            if (e.key === 'Escape')
-                closeRef.current();
-            if (e.key === 'Tab') {
-                const all = get();
-                if (!all.length) {
-                    e.preventDefault();
-                    return;
-                }
-                if (e.shiftKey && document.activeElement === all[0]) {
-                    e.preventDefault();
-                    all[all.length - 1]?.focus();
-                }
-                else if (!e.shiftKey && document.activeElement === all[all.length - 1]) {
-                    e.preventDefault();
-                    all[0]?.focus();
-                }
-            }
-        };
-        const overflow = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        document.addEventListener('keydown', key);
-        return () => { document.removeEventListener('keydown', key); document.body.style.overflow = overflow; prev?.focus(); };
-    }, []);
-    return <div className={`overlay ${drawer ? 'drawer-overlay' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget)
-        onClose(); }}><div ref={ref} role="dialog" aria-modal="true" aria-label={tr(title)} className={`dialog ${wide ? 'wide' : ''} ${drawer ? 'drawer' : ''}`}><div className="dialog-heading"><div><h2>{tr(title)}</h2>{subtitle && <p>{tr(subtitle)}</p>}</div><button className="icon-button" aria-label={tr("닫기")} onClick={onClose}><X size={20}/></button></div>{children}</div></div>;
-}
 function ExportButton({ onClick, text = '내보내기' }: {
     onClick: () => void;
     text?: string;
@@ -436,9 +397,9 @@ export default function Workspace({ initialEnvelope, onExpired }: {
       <div className="sidebar-bottom"><button className={`nav-item ${page === 'audit' ? 'active' : ''}`} onClick={() => navigate('audit')}><History size={18}/><span>{tr("활동 기록")}</span></button><button className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}><Settings2 size={18}/><span>{tr("워크스페이스 설정")}</span></button><button className="nav-item" onClick={() => setModal('help')}><CircleHelp size={18}/><span>{tr("사용 안내")}</span></button><div className="demo-note"><span className="demo-indicator"/><div><strong>{tr("서버 워크스페이스")}</strong><p>{tr("직원 권한 · 암호화 DB 저장")}</p></div></div><div className="sidebar-user"><span className="user-avatar">EH</span><div><strong>{session.actor.name}</strong><small>{session.actor.roles.map(r => tr(roleLabels[r])).join(' · ')}</small></div><Badge>MFA</Badge></div></div>
     </aside>
     <div className="main-shell"><header className="topbar"><div className="breadcrumb"><button className="icon-button mobile-menu" aria-label={tr("메뉴 열기")} onClick={() => setMobileNav(true)}><Menu size={21}/></button><span>{tr("워크스페이스")}</span><ChevronRight size={13}/><strong>{tr(source.title)}</strong></div><div className="topbar-actions"><LanguageSwitcher/><button aria-label={tr("환자·업무 빠른 검색")} className="global-search" onClick={() => { setSearch(''); setModal('search'); }}><Search size={17}/><span>{tr("환자·업무 빠른 검색")}</span><kbd>⌘ K</kbd></button><span className="topbar-divider"/><button className="notification-button icon-button" aria-label={tr("주의 알림 {0}건", [overdue.length])} onClick={() => setModal('notifications')}><Bell size={20}/>{overdue.length > 0 && <i />}</button><button className="top-avatar" aria-label={tr("워크스페이스 설정")} onClick={() => navigate('settings')}>EH</button></div></header>
-      <main id="main-content" tabIndex={-1} ref={contentRef}><div className="page-heading"><div>{page === 'dashboard' ? <p className="date-label"><span className="small-sun">☀</span>{new Date(data.referenceDate + 'T12:00:00Z').toLocaleDateString(localeTag, { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}<span className="date-demo">{tr("LA 기준일")}</span></p> : <p className="eyebrow">{source.english}</p>}<h1>{tr(source.title)}<span className="heading-accent">.</span></h1><p className="page-description">{tr(source.description)}</p></div><div className="page-actions">{page === 'dashboard' && <ExportButton text={tr("업무 내보내기")} onClick={() => exportTasks(pending)}/>}<button className="button primary" disabled={busy || (page === 'signatures' ? !can(session.actor.roles, 'task.clinical') : page === 'followups' ? !allowedTaskLanes(session.actor.roles).length : page === 'billing' ? !can(session.actor.roles, 'claim.write') || !data.patients.length : page === 'remittance' ? !can(session.actor.roles, 'receipt.write') : !can(session.actor.roles, 'patient.create'))} title={tr("직원 역할에 따른 작업 권한이 적용됩니다.")} onClick={() => page === 'signatures' || page === 'followups' ? startTask() : setModal(page === 'billing' ? 'claim' : page === 'remittance' ? 'receipt' : 'admission')}><Plus size={17}/>{page === 'signatures' || page === 'followups' ? tr("업무 추가") : page === 'billing' ? tr("새 청구") : page === 'remittance' ? tr("입금 등록") : tr("새 어드미션")}</button></div></div>
+      <main id="main-content" tabIndex={-1} ref={contentRef}><div className="page-heading"><div>{page === 'dashboard' ? <p className="date-label"><span className="small-sun">☀</span>{new Date(data.referenceDate + 'T12:00:00Z').toLocaleDateString(localeTag, { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}<span className="date-demo">{tr("LA 기준일")}</span></p> : <p className="eyebrow">{source.english}</p>}<h1>{tr(source.title)}<span className="heading-accent">.</span></h1><p className="page-description">{tr(source.description)}</p></div><div className="page-actions">{page === 'dashboard' && <ExportButton text={tr("업무 내보내기")} onClick={() => exportTasks(pending)}/>}{page!=='dme'&&page!=='medications'&&<button className="button primary" disabled={busy || (page === 'signatures' ? !can(session.actor.roles, 'task.clinical') : page === 'followups' ? !allowedTaskLanes(session.actor.roles).length : page === 'billing' ? !can(session.actor.roles, 'claim.write') || !data.patients.length : page === 'remittance' ? !can(session.actor.roles, 'receipt.write') : !can(session.actor.roles, 'patient.create'))} title={tr("직원 역할에 따른 작업 권한이 적용됩니다.")} onClick={() => page === 'signatures' || page === 'followups' ? startTask() : setModal(page === 'billing' ? 'claim' : page === 'remittance' ? 'receipt' : 'admission')}><Plus size={17}/>{page === 'signatures' || page === 'followups' ? tr("업무 추가") : page === 'billing' ? tr("새 청구") : page === 'remittance' ? tr("입금 등록") : tr("새 어드미션")}</button>}</div></div>
       <div className="server-status-bar"><span><ShieldCheck size={13}/>{tr("서버 연결 ·")}{session.database} · v{session.version}</span><span>{busy ? tr("저장 중…") : session.phiAllowed ? tr("기관 운영 환경") : tr("실환자 입력 제한 · 승인 전 검증 환경")}</span><button onClick={refresh} disabled={busy}>{tr("새로고침")}</button></div>
-      {page === 'dashboard' ? renderDashboard() : page === 'patients' ? renderPatients() : page === 'admissions' ? renderAdmissions() : page === 'signatures' ? renderTasks(true) : page === 'followups' ? renderTasks() : page === 'billing' ? renderBilling() : page === 'remittance' ? renderRemittance() : page === 'reports' ? renderReports() : page === 'audit' ? renderAudit() : renderSettings()}
+      {page==='dme'||page==='medications'? <OrdersWorkspace key={page} kind={page==='dme'?'dme':'medication'} data={data} session={session} busy={busy} sendCommand={sendCommand}/> : page === 'dashboard' ? renderDashboard() : page === 'patients' ? renderPatients() : page === 'admissions' ? renderAdmissions() : page === 'signatures' ? renderTasks(true) : page === 'followups' ? renderTasks() : page === 'billing' ? renderBilling() : page === 'remittance' ? renderRemittance() : page === 'reports' ? renderReports() : page === 'audit' ? renderAudit() : renderSettings()}
       <footer className="page-footer"><span><Leaf size={13}/>{tr("작은 확인이 모여, 더 세심한 돌봄으로.")}</span><span>Eminent Hospice Care <i>·</i> Office Flow</span></footer></main>
     </div>
     {toast && <div className="toast" role="status"><CheckCircle2 size={18}/><span>{tr(toast)}</span><button aria-label={tr("알림 닫기")} onClick={() => setToast('')}><X size={16}/></button></div>}
