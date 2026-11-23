@@ -5,7 +5,7 @@ export type SignerRole = 'hospice_md' | 'attending_md' | 'employed_np' | 'extern
 export type Evidence = { reference: string; recordedAt: string; signer?: string; signerRole?: SignerRole; encounterDate?: string; secondSigner?: string; approvedDate?: string; effectiveDate?: string };
 export type Patient = {
   id: string; number: string; name: string; admissionDate: string; electionDate: string;
-  period: number; periodStart: string; level: 'RHC' | 'GIP' | 'CHC' | 'IRC'; location: 'Home' | 'SNF/NF';
+  period: number; periodStart: string; level: 'RHC' | 'GIP' | 'CHC' | 'IRC'; location: 'Home' | 'ALF' | 'Residential' | 'SNF/NF';
   facility: string; physician: string; attendingIsMD: boolean; owner: string;
   status: 'active' | 'onboarding' | 'review' | 'discharged';
   checks: Record<GateCode, boolean>; proofs: Partial<Record<GateCode, Evidence>>;

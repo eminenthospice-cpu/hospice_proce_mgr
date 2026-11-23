@@ -52,7 +52,7 @@ async function handleApiInternal(request:Request,env:Env):Promise<Response>{
    const input=envelope.parse(await body(request)),hash=await commandFingerprint(input.command);
    const receipt=await env.DB.prepare('SELECT command_hash,member_id FROM command_receipts WHERE agency_id = ? AND request_id = ?').bind(actor.agencyId,input.requestId).first<{command_hash:string;member_id:string}>();
    if(receipt){assert(receipt.command_hash===hash&&receipt.member_id===actor.id,409,'request_mismatch','요청 식별자가 다른 작업에 사용되었습니다.');return json(await snapshot(env,actor));}
-   if(['claim.release','samples.load'].includes(input.command.type)||input.command.type==='audit.record'&&input.command.event==='export')requireRecent(auth.session);
+   if(['claim.release','samples.load','samples.census'].includes(input.command.type)||input.command.type==='audit.record'&&input.command.event==='export')requireRecent(auth.session);
    const {state,version}=await readWorkspace(env,actor.agencyId);assert(version===input.version,409,'version_conflict','다른 직원이 먼저 변경했습니다. 최신 데이터를 불러온 뒤 다시 저장하세요.');
    const outcome=reduceCommand(state,actor,input.command,env.PHI_PROCESSING_APPROVED==='true');
    if(input.command.type==='task.create'||input.command.type==='task.assign'||input.command.type==='patient.create'){

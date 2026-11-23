@@ -3,9 +3,10 @@ import { addDays, isDate, evaluateGate, validateEvidence, canReconcile, laToday,
 import { can, type Actor, type Permission } from '../lib/permissions.ts';
 import { assert } from './types.ts';
 import { isLimitedPatientName, isSyntheticPatientName } from '../lib/patient-privacy.ts';
+import {createCensusDemo, CENSUS_DEMO_PREFIX} from '../lib/census-demo.ts';
 
 const id=z.string().min(1).max(100).regex(/^[\w-]+$/),date=z.string().refine(isDate),text=z.string().trim().min(1).max(120),amount=z.number().int().min(0).max(100000000);
-export const patientInput=z.object({id,number:z.string().trim().min(1).max(40),name:z.string().trim().min(1).max(120),admissionDate:date,electionDate:date,periodStart:date,period:z.number().int().min(1).max(100),level:z.enum(['RHC','GIP','CHC','IRC']),location:z.enum(['Home','SNF/NF']),facility:text,physician:text,attendingIsMD:z.boolean(),owner:text}).strict();
+export const patientInput=z.object({id,number:z.string().trim().min(1).max(40),name:z.string().trim().min(1).max(120),admissionDate:date,electionDate:date,periodStart:date,period:z.number().int().min(1).max(100),level:z.enum(['RHC','GIP','CHC','IRC']),location:z.enum(['Home','ALF','Residential','SNF/NF']),facility:text,physician:text,attendingIsMD:z.boolean(),owner:text}).strict();
 const evidence=z.object({reference:text,recordedAt:z.string().optional(),signer:z.string().max(100).optional(),signerRole:z.enum(['hospice_md','attending_md','employed_np','external_np','pa','patient','representative']).optional(),encounterDate:z.union([date,z.literal('')]).optional(),secondSigner:z.string().max(120).optional(),approvedDate:z.union([date,z.literal('')]).optional(),effectiveDate:z.union([date,z.literal('')]).optional()}).strict();
 export const commandSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('patient.create'),patient:patientInput}).strict(),
@@ -21,6 +22,7 @@ export const commandSchema=z.discriminatedUnion('type',[
   z.object({type:z.literal('discharge.update'),reviewId:id,checks:z.array(z.boolean()).length(4),references:z.array(z.string().max(120)).length(4),confirm:z.boolean()}).strict(),
   z.object({type:z.literal('audit.record'),event:z.enum(['patient.view','export']),patientId:id.optional(),report:z.string().max(80).optional()}).strict(),
   z.object({type:z.literal('samples.load')}).strict(),
+  z.object({type:z.literal('samples.census')}).strict(),
 ]);
 export type Command=z.infer<typeof commandSchema>;
 export function emptyWorkspace():AppState{return {schemaVersion:1,referenceDate:laToday(),patients:[],tasks:[],claims:[],remittances:[],discharges:[],dcMonths:[],audit:[]};}
@@ -90,6 +92,14 @@ export function reduceCommand(before:AppState,actor:Actor,command:Command,phiAll
    if(command.event==='export'){requirePermission(actor,'export');action='CSV 내보내기';entity='report';detail='이름 제외 · 사용자·기관·시각 워터마크';}
    else {assert(command.patientId,422,'patient_required','환자 참조가 필요합니다.');visiblePatient(actor,state,command.patientId);action='환자 조회';entity=command.patientId;}
    break;
+  }
+  case 'samples.census':{
+   requirePermission(actor,'staff.manage');assert(!phiAllowed,423,'demo_only','가상 데이터는 검증 환경에서만 추가할 수 있습니다.');
+   assert(!state.patients.some(p=>p.number.startsWith(CENSUS_DEMO_PREFIX)),409,'already_exists','이 가상 데모는 이미 추가되어 있습니다.');
+   const demo=createCensusDemo(today,actor.name),oldIds=new Set([...state.patients,...state.tasks,...state.claims,...state.remittances,...state.discharges].map(r=>r.id));
+   assert([...demo.patients,...demo.tasks].every(r=>!oldIds.has(r.id)),409,'duplicate_id','이미 사용된 참조번호입니다.');
+   state.patients.push(...demo.patients);state.tasks.push(...demo.tasks);
+   action='가상 Census 데모 추가';entity='demo-hmd-census';detail='가상 환자 38명 · 원본 환자 연결 없음 · 기존 데이터 유지';break;
   }
   case 'samples.load':{
    requirePermission(actor,'staff.manage');assert(!state.patients.length,409,'not_empty','빈 워크스페이스에만 가상 샘플을 추가할 수 있습니다.');const samples=initialState();samples.referenceDate=today;samples.audit=[];Object.assign(state,samples);action='가상 샘플 추가';entity='workspace';detail='고정된 가상 환자 30명 · 실제 데이터 없음';break;

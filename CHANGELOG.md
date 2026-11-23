@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.1 — 2026-11-23
+
+- Added an administrator-only 38-patient synthetic census demo with recent MFA, duplicate prevention, atomic append, and a dedicated patient-list filter. Existing patients and workflow records are preserved.
+- Added Assisted Living Facility and residential-setting categories. Residential settings require place-of-service verification; no billing POS code is inferred.
+- Demo identities, dates, facilities, physicians, evidence, and statuses are generated independently of individual EHR records. No EHR write, live synchronization, source patient crosswalk, or patient export endpoint was added.
+
+Validation: 39 automated tests, TypeScript checking, production build, and local browser checks for append behavior, 38-patient filtering, and both languages.
+
 ## v1.1.0 — 2026-11-23
 
 - Added Korean and English JSON language packs and a language selector on the sign-in and workspace screens.

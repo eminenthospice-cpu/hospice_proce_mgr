@@ -97,3 +97,21 @@ test('I18N API: English errors retain permissions, PHI lock and canonical stored
   assert.equal(denied.status,403);assert.doesNotMatch(denied.body.error.message,/[가-힣]/);
  }finally{db.close();}
 });
+
+test('CENSUS API: admin MFA, append-only data, duplicate protection and audit logging',async()=>{
+ const {db,env,owner}=fixture();try{
+  const enrollment=await enroll(env,owner);await command(env,owner,{type:'samples.load'});
+  const viewer=await staff(env,owner,'Census Viewer','read_only');
+  assert.equal((await command(env,viewer,{type:'samples.census'})).status,403);
+  db.sqlite.prepare('UPDATE sessions SET verified_at=? WHERE member_id=(SELECT id FROM members WHERE email=?)').run(Date.now()-301000,owner.email);
+  assert.equal((await command(env,owner,{type:'samples.census'})).status,428);
+  assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:enrollment.codes[0]})).status,200);
+  const before=(await call(env,owner,'/api/workspace')).body;
+  const result=await command(env,owner,{type:'samples.census'});assert.equal(result.status,200);assert.equal(result.body.data.patients.length,before.data.patients.length+38);
+  for(const p of before.data.patients)assert.deepEqual(result.body.data.patients.find((r:{id:string})=>r.id===p.id),p);
+  assert.deepEqual(result.body.data.claims,before.data.claims);
+  assert.equal((await command(env,owner,{type:'samples.census'})).status,409);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='가상 Census 데모 추가'").get()!.n,1);
+  assert.equal((await command(env,owner,{type:'samples.census',patients:[]})).status,422);
+ }finally{db.close();}
+});

@@ -889,5 +889,21 @@
   "active": "Active",
   "onboarding": "Admission in progress",
   "discharged": "Discharged",
-  "F2F encounter": "Face-to-face encounter (F2F)"
+  "F2F encounter": "Face-to-face encounter (F2F)",
+  "가상 데이터는 검증 환경에서만 추가할 수 있습니다.": "Synthetic data can only be added in the verification environment.",
+  "이 가상 데모는 이미 추가되어 있습니다.": "This synthetic demo has already been added.",
+  "가상 Census 데모 추가": "Add synthetic census demo",
+  "가상 환자 38명 · 원본 환자 연결 없음 · 기존 데이터 유지": "38 synthetic patients · No link to original patients · Existing data preserved",
+  "가상 시나리오입니다. 원본 환자의 서류·인증 상태가 아닙니다.": "Fictional scenario. These are not the original patient’s document or certification statuses.",
+  "누적 Benefit period 이력 확인": "Verify cumulative benefit period history",
+  "HospiceMD Active 목록의 집계 구성을 참고한 가상 환자 38명입니다. 이름·번호·날짜·의사·시설·확인 상태는 모두 가상 값이며 기존 데이터를 유지합니다.": "38 synthetic patients based on aggregate patterns from the HospiceMD Active census. Names, identifiers, dates, physicians, facilities, and review statuses are fictional. Existing data is preserved.",
+  "38명 Census 데모가 추가되어 있습니다": "38-patient census demo already added",
+  "38명 Census 가상 데모 추가": "Add 38-patient synthetic census demo",
+  "38명 Census 데모": "38-patient census demo",
+  "HospiceMD 환자 기록을 가져오거나 변경하지 않습니다. 외부 EHR과 자동 동기화하지 않습니다.": "Individual HospiceMD records are not imported or changed. This demo does not synchronize with the EHR.",
+  "가상 환자 38명 추가": "Add 38 synthetic patients",
+  "가상 환자 38명을 추가했습니다. 환자 목록에서 Census 데모 필터를 선택하세요.": "Added 38 synthetic patients. Select the census demo filter in Patients.",
+  "등록된 환자의 가상 데이터와 기관 업무를 검색할 수 있습니다.": "Search registered synthetic patients and agency tasks.",
+  "Assisted Living Facility (ALF)": "Assisted Living Facility (ALF)",
+  "Residential setting · verify POS": "Residential setting · Verify place of service"
 }
