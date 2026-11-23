@@ -47,7 +47,7 @@ Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자�
 - 생성한 D1: `eminent-hospice-mgr` (`d86f7ab8-9cb3-48a1-9431-9760a491ac86`). Western North America 배치 힌트이며 데이터 주권 보장은 아닙니다.
 - Worker `eminent-hospice-mgr`를 `https://mgr.eminenthospice.com`에 배포했습니다. D1 마이그레이션 2개가 원격 적용되어 앱 테이블 11개와 감사 보호 트리거 2개를 확인했습니다.
 - Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 One-time PIN만 사용하고 개별 초대 이메일 정책을 적용합니다. 초기 허용 이메일은 `slee1005@gmail.com` 하나입니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 적용했습니다.
-- 최종 Worker 버전: `c750ef69-eaf0-4756-a3bf-caeb579c9fd9` (v1.2.0 · 2026-11-23). 비로그인 화면·업무 API는 Access 로그인으로 이동합니다.
+- 최종 Worker 버전: `cd5ae487-7d0d-43e0-9114-805bf06e1f2a` (v1.3.0 · 2026-11-23). 비로그인 화면·업무 API는 Access 로그인으로 이동합니다.
 - `slee1005@gmail.com` 관리자가 첫 이메일 인증·TOTP 등록을 완료한 뒤 실제 어드미션 화면에서 관리자·MFA 표시와 Cloudflare D1 연결을 확인했습니다. 다른 직원의 첫 인증 앱 등록도 각 본인이 진행해야 합니다.
 - 기존 Sites의 `records`와 `members`가 비어 있음을 2026-11-22에 확인했습니다. 새 D1에서 시작하며 기존 Sites 앱과 비밀 키는 변경하지 않았습니다. 이후 기존 사이트에 데이터가 추가되면 두 환경을 동시에 업무에 사용하지 말고 이관 범위를 다시 확인하세요.
 - `PHI_PROCESSING_APPROVED=false`입니다. BAA와 Workers·D1·Access의 계약상 적용 범위를 확인하기 전에는 실제 환자정보를 입력하지 마세요.
