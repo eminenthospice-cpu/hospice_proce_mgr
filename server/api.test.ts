@@ -6,13 +6,13 @@ import { TestDatabase } from './test-database.ts';
 import type { Env } from './types.ts';
 import { totp,encrypt,decrypt } from './crypto.ts';
 import { AGENCY_ID } from './store.ts';
-type Who={id:string;email:string;name:string;cookie?:string};
+type Who={id:string;email:string;name:string;cookie?:string;locale?:string};
 const keys=await generateKeyPair('RS256');
 const jwk={...await exportJWK(keys.publicKey),kid:'test-key',alg:'RS256',use:'sig'};
 mock.method(globalThis,'fetch',async(input:RequestInfo|URL)=>{assert.equal(String(input),'https://hospice-test.cloudflareaccess.com/cdn-cgi/access/certs');return Response.json({keys:[jwk]});});
 async function accessToken(env:Env,who:Who,claims:Record<string,unknown>={},key=keys.privateKey){return new SignJWT({type:'app',email:who.email,name:who.name,...claims}).setProtectedHeader({alg:'RS256',kid:'test-key'}).setIssuer(`https://${env.CF_ACCESS_TEAM_DOMAIN}`).setAudience(env.CF_ACCESS_AUD).setSubject(who.id).setIssuedAt().setExpirationTime('1h').sign(key);}
 function fixture(){const db=new TestDatabase();const env:Env={DB:db,DATA_ENCRYPTION_KEY:'11'.repeat(32),OWNER_EMAIL:'owner@example.test',SITE_ORIGIN:'https://office.example.test',CF_ACCESS_TEAM_DOMAIN:'hospice-test.cloudflareaccess.com',CF_ACCESS_AUD:'test-access-audience'};const owner:Who={id:'trusted-owner',email:env.OWNER_EMAIL,name:'테스트 관리자'};return {db,env,owner};}
-async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={};if(who){headers['Cf-Access-Jwt-Assertion']=await accessToken(env,who);if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
+async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={'Accept-Language':who?.locale||'ko'};if(who){headers['Cf-Access-Jwt-Assertion']=await accessToken(env,who);if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
 async function enroll(env:Env,who:Who){const start=await call(env,who,'/api/auth/start','POST',{});assert.equal(start.status,200);who.cookie=start.cookie;const setup=await call(env,who,'/api/auth/enrollment');assert.equal(setup.status,200);const code=await totp(setup.body.secret,Math.floor(Date.now()/30000));const verify=await call(env,who,'/api/auth/verify','POST',{code});assert.equal(verify.status,200);return {secret:setup.body.secret,codes:verify.body.recoveryCodes as string[]};}
 async function command(env:Env,who:Who,cmd:unknown,version?:number,requestId=crypto.randomUUID()){const snapshot=version===undefined?await call(env,who,'/api/workspace'):null;return call(env,who,'/api/commands','POST',{requestId,version:version??snapshot!.body.version,command:cmd});}
 async function staff(env:Env,who:Who,name:string,role:string){const snap=await call(env,who,'/api/workspace');const email=`${role}@example.test`;const result=await call(env,who,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email,name,roles:[role],patientIds:[],status:'active'}});assert.equal(result.status,200);const member:Who={id:`trusted-${role}`,email,name};await enroll(env,member);return member;}
@@ -76,5 +76,24 @@ test('PRIVACY: approved environments store only an initial and surname; approval
    const stored=await decrypt<{name:string;number:string}>(String(raw.ciphertext),env.DATA_ENCRYPTION_KEY,`${AGENCY_ID}:patients:${patient.id}`);
    assert.equal(stored.name,name);assert.equal(stored.number,patient.number);assert.ok(!String(raw.ciphertext).includes(name));
   }
+ }finally{db.close();}
+});
+
+test('I18N API: English errors retain permissions, PHI lock and canonical stored values',async()=>{
+ const {db,env,owner}=fixture();owner.locale='en';try{
+  const anonymous=await handleApi(new Request(env.SITE_ORIGIN+'/api/workspace',{headers:{'Accept-Language':'en'}}),env);
+  assert.equal(anonymous.status,401);assert.doesNotMatch((await anonymous.json()).error.message,/[가-힣]/);
+  await enroll(env,owner);
+  const p={id:'english-demo',number:'DEMO-EN-1',name:'Demo Patient',admissionDate:'2026-11-22',electionDate:'2026-11-22',periodStart:'2026-11-22',period:1,level:'RHC',location:'Home',facility:'Home',physician:'Dr Demo',attendingIsMD:true,owner:owner.name};
+  const locked=await command(env,owner,{type:'patient.create',patient:{...p,number:'INTERNAL-EN-1',name:'J. Smith'}});
+  assert.equal(locked.status,423);assert.equal(locked.body.error.code,'phi_not_approved');assert.doesNotMatch(locked.body.error.message,/[가-힣]/);
+  assert.equal((await command(env,owner,{type:'patient.create',patient:p})).status,200);
+  assert.equal((await call(env,owner,'/api/patients/english-demo/name')).body.name,'Demo Patient');
+  const task={id:'english-task',patientId:p.id,title:'Review DEMO documents',category:'서류',lane:'admin',owner:owner.name,due:'2026-11-22'};
+  const saved=await command(env,owner,{type:'task.create',task});assert.equal(saved.status,200);
+  const actual=saved.body.data.tasks.find((t:{id:string})=>t.id===task.id);assert.equal(actual.category,'서류');assert.equal(actual.title,task.title);assert.equal(actual.owner,owner.name);
+  const viewer=await staff(env,owner,'English Viewer','read_only');viewer.locale='en';
+  const denied=await command(env,viewer,{type:'task.create',task:{...task,id:'forbidden-task'}});
+  assert.equal(denied.status,403);assert.doesNotMatch(denied.body.error.message,/[가-힣]/);
  }finally{db.close();}
 });

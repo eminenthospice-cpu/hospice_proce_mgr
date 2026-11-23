@@ -1,13 +1,13 @@
 {
   "name": "eminent-hospice-office-flow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "npm run build:client && node scripts/build-worker.mjs",
     "start": "next start",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test lib/domain.test.ts server/*.test.ts",
+    "test": "node --experimental-strip-types --test lib/*.test.ts server/*.test.ts",
     "build:client": "next build",
     "db:generate": "drizzle-kit generate",
     "cf:whoami": "wrangler whoami",

@@ -3,6 +3,7 @@ import { handleApi } from './api.ts';
 import { cookie } from './auth.ts';
 import { identity } from './identity.ts';
 import { ApiError, type Env } from './types.ts';
+import { localizeErrorResponse } from '../lib/i18n.ts';
 
 async function route(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
@@ -37,6 +38,7 @@ export default {
         message: known ? error.message : '서버 설정 또는 연결을 확인하세요.',
       } }, { status: known ? error.status : 503, headers: { 'Cache-Control': 'no-store, private' } });
     }
+    response = await localizeErrorResponse(response, request);
     const headers = new Headers(response.headers);
     headers.set('X-Content-Type-Options', 'nosniff');
     headers.set('Referrer-Policy', 'no-referrer');

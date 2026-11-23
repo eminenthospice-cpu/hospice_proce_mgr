@@ -6,6 +6,7 @@ import { readSession, verifyOrigin, startSession, enrollment, verifyMfa, logout,
 import { identity } from './identity.ts';
 import { AGENCY_ID, asStaff, memberByIdentity, readWorkspace, filteredState, logAudit, commitState, commandFingerprint, type MemberRow } from './store.ts';
 import { randomHex } from './crypto.ts';
+import { localizeErrorResponse } from '../lib/i18n.ts';
 
 const envelope=z.object({requestId:z.string().uuid(),version:z.number().int().min(0),command:commandSchema}).strict();
 async function body(request:Request){
@@ -19,6 +20,9 @@ async function body(request:Request){
 const json=(value:unknown,status=200,headers?:HeadersInit)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store, private','Pragma':'no-cache',...headers}});
 async function snapshot(env:Env,actor:Actor){const {state,version}=await readWorkspace(env,actor.agencyId);const rows=await env.DB.prepare('SELECT * FROM members WHERE agency_id = ? ORDER BY created_at').bind(actor.agencyId).all<MemberRow>();const full=can(actor.roles,'staff.manage');const members=rows.results.filter(r=>full||r.status==='active').map(asStaff).map(s=>full?s:{...s,email:'',patientIds:[]});const session:WorkspaceSession={actor,members,version,phiAllowed:env.PHI_PROCESSING_APPROVED==='true',database:'Cloudflare D1'};return {data:await filteredState(env,actor,state),...session};}
 export async function handleApi(request:Request,env:Env):Promise<Response>{
+ return localizeErrorResponse(await handleApiInternal(request,env),request);
+}
+async function handleApiInternal(request:Request,env:Env):Promise<Response>{
  let actor:Actor|undefined;const requestId=randomHex(8);const path=new URL(request.url).pathname;
  try{
   assert(env.DB&&env.DATA_ENCRYPTION_KEY&&env.OWNER_EMAIL&&env.SITE_ORIGIN,503,'not_configured','서버 DB·암호화·관리자 설정이 준비되지 않았습니다.');

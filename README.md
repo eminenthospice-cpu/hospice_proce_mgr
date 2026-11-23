@@ -2,6 +2,14 @@
 
 Next.js 15 / React 19 UI와 서버 API를 단일 Cloudflare Worker로 빌드합니다. 배포 대상은 `https://mgr.eminenthospice.com`이며, 직원 인증은 Cloudflare Access, 업무 권한·MFA·암호화 레코드는 기관 전용 Cloudflare D1으로 관리합니다.
 
+## v1.1.0 · 한국어 / English
+
+로그인 화면과 업무 화면 오른쪽 위의 언어 선택에서 **한국어 / English**를 전환합니다. [영문 바로가기](https://mgr.eminenthospice.com/?lang=en)와 [한국어 바로가기](https://mgr.eminenthospice.com/?lang=ko)를 사용할 수 있습니다. 명시된 URL 언어, 같은 브라우저의 저장된 선택, 브라우저 기본 언어 순서로 적용합니다.
+
+`locales/ko.json`과 `locales/en.json`이 공통 언어팩입니다. 화면 표시와 오류 안내, 날짜 형식, CSV 제목을 번역하며 DB의 역할·구분 값과 업무 규칙은 바꾸지 않습니다. 직원·환자 이름, 내부번호와 입력한 증빙 참조는 원문을 유지합니다. 브라우저에는 `eh-office-locale` 언어 선택만 저장하며 환자 데이터는 저장하지 않습니다. 새 문구는 두 언어팩에 함께 추가하고 `npm test`로 키·변수 일치를 확인하세요.
+
+업무 용어는 CMS 영문 명칭을 기준으로 통일했습니다. 도움말과 설정의 CMS 용어표에서 공식 출처를 열 수 있습니다. 한국어는 설명용 번역입니다. [CMS 용어 기준](docs/cms-terminology.md)과 [변경 이력](CHANGELOG.md)을 참조하세요.
+
 ## 현재 이전 상태
 
 - Cloudflare 계정: `Eminenthospice@gmail.com's Account` (`aca0fd772c7c9e078fed7979460d4d28`).
@@ -73,7 +81,7 @@ D1 구조의 원본은 `db/schema.ts`, 마이그레이션은 `drizzle/`입니다
 
 현재 이 계정의 체결된 BAA는 확인되지 않았습니다. 최신 [Cloudflare HIPAA FAQ](https://www.cloudflare.com/trust-hub/compliance-resources/hipaa/)에는 **Workers·D1·Access가 HIPAA AoC 범위**로 명시되어 있지만, 기관의 실제 PHI 처리에는 Enterprise BAA를 양측이 체결하고 적용 계정·서비스와 조건을 확인해야 합니다. 현재 계정은 Workers Free / Teams Free이며 단순 유료 업그레이드는 BAA를 대신하지 않습니다. 실환자 운영 전 기관의 접근 통제, 백업·복구, 키 관리, 감사 보존과 운영 검토도 필요합니다.
 
-환자 생성 API는 `DEMO-` 번호와 `데모`로 시작하는 이름만 허용합니다. 자유 텍스트가 자동으로 비식별화되는 것은 아니므로 실제 환자·임상·연락처 정보를 입력하지 마세요. 빈 DB에만 고정 가상 샘플 30명을 추가할 수 있습니다. `PHI_PROCESSING_APPROVED`를 계약·기관 검토 없이 변경하지 마세요.
+환자 생성 API는 `DEMO-` 번호와 `데모` 또는 `Demo `로 시작하는 이름만 허용합니다. 자유 텍스트가 자동으로 비식별화되는 것은 아니므로 실제 환자·임상·연락처 정보를 입력하지 마세요. 빈 DB에만 고정 가상 샘플 30명을 추가할 수 있습니다. `PHI_PROCESSING_APPROVED`를 계약·기관 검토 없이 변경하지 마세요.
 
 빌드는 `out/`와 `dist/server/index.js`를 생성합니다. `next dev`만으로는 Worker API가 실행되지 않습니다. 실제 직원의 로그인과 인증 앱 등록은 각 사용자가 직접 진행합니다. 테스트는 날짜·청구 게이트, JWT 위조·범위·만료, 직원 승인·역할, MFA·복구 코드, 세션 만료, 암호화, CSRF, 요청 크기, 동시 저장과 감사 기록 보호를 검증합니다.
 

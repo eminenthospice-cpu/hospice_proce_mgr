@@ -3,3 +3,7 @@
 export function isLimitedPatientName(value: string): boolean {
   return /^\p{L}\. [\p{L}\p{M}]+(?:[. '’\-]+[\p{L}\p{M}]+)*$/u.test(value.trim());
 }
+
+export function isSyntheticPatientName(value: string): boolean {
+  return value.startsWith('데모') || /^Demo(?:\s|$)/i.test(value);
+}
