@@ -46,8 +46,8 @@ Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자�
 - Cloudflare 계정: `Eminenthospice@gmail.com's Account` (`aca0fd772c7c9e078fed7979460d4d28`).
 - 생성한 D1: `eminent-hospice-mgr` (`d86f7ab8-9cb3-48a1-9431-9760a491ac86`). Western North America 배치 힌트이며 데이터 주권 보장은 아닙니다.
 - Worker `eminent-hospice-mgr`를 `https://mgr.eminenthospice.com`에 배포했습니다. D1 마이그레이션 2개가 원격 적용되어 앱 테이블 11개와 감사 보호 트리거 2개를 확인했습니다.
-- Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 One-time PIN만 사용하고 개별 초대 이메일 정책을 적용합니다. 초기 허용 이메일은 `slee1005@gmail.com` 하나입니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 적용했습니다.
-- 최종 Worker 버전: `cd5ae487-7d0d-43e0-9114-805bf06e1f2a` (v1.3.0 · 2026-11-23). 비로그인 화면·업무 API는 Access 로그인으로 이동합니다.
+- Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 Google 로그인만 사용합니다. `Eminent Google sign-in` 정책은 Google에서 확인한 신원을 앱으로 전달하며, 앱이 Staff의 활성 이메일·역할과 MFA를 확인한 후 업무 데이터를 제공합니다. Staff 등록 외에 별도 Access 이메일 등록은 필요하지 않습니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 유지합니다.
+- 최종 Worker 버전: `fdcf806d-cd3f-447b-aedd-ba2861ca0a08` (v1.3.1 · 2026-11-24). 비로그인 화면·업무 API는 Google 계정 선택 화면으로 이동합니다.
 - `slee1005@gmail.com` 관리자가 첫 이메일 인증·TOTP 등록을 완료한 뒤 실제 어드미션 화면에서 관리자·MFA 표시와 Cloudflare D1 연결을 확인했습니다. 다른 직원의 첫 인증 앱 등록도 각 본인이 진행해야 합니다.
 - 기존 Sites의 `records`와 `members`가 비어 있음을 2026-11-22에 확인했습니다. 새 D1에서 시작하며 기존 Sites 앱과 비밀 키는 변경하지 않았습니다. 이후 기존 사이트에 데이터가 추가되면 두 환경을 동시에 업무에 사용하지 말고 이관 범위를 다시 확인하세요.
 - `PHI_PROCESSING_APPROVED=false`입니다. BAA와 Workers·D1·Access의 계약상 적용 범위를 확인하기 전에는 실제 환자정보를 입력하지 마세요.
@@ -56,13 +56,13 @@ Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자�
 
 최초 앱 관리자는 **slee1005@gmail.com**입니다. 첫 방문자에게 관리자 권한을 주지 않습니다. Cloudflare 계정 소유자와 앱 내부 관리자는 별개입니다.
 
-1. Cloudflare Zero Trust에서 `mgr.eminenthospice.com`용 Self-hosted Access 앱을 만듭니다. One-time PIN 또는 승인된 조직 IdP를 연결합니다.
-2. Allow 정책에 **초대받은 직원의 개별 이메일만** 등록합니다. 초기에는 `slee1005@gmail.com`만 허용합니다. Everyone·전체 이메일 도메인 허용·Bypass 정책은 사용하지 않습니다.
-3. 직원은 이메일로 로그인한 뒤 앱에서 접근 요청을 제출합니다. 신규 계정은 역할이 없는 `pending` 상태로 업무 데이터에 접근할 수 없습니다.
-4. 앱 관리자가 `워크스페이스 설정 → 직원별 접근 권한`에서 역할을 부여합니다.
-5. 승인 직원은 자신의 인증 앱으로 TOTP를 설정합니다. 복구 코드 8개는 최초 설정 때 한 번 표시합니다.
+1. Cloudflare Access 앱의 로그인 방법은 Google 하나로 지정하고, Allow 정책의 `Include → Login Methods`에 해당 Google 제공자를 선택합니다. Bypass 정책은 사용하지 않습니다.
+2. 앱 관리자가 `워크스페이스 설정 → 직원별 접근 권한`에서 직원의 **Google 계정 이메일**, 역할, 활성 상태를 저장합니다. 별도 Cloudflare 이메일 허용 목록은 관리하지 않습니다.
+3. 등록된 직원은 같은 이메일의 Google 계정으로 로그인한 뒤 업무 세션을 시작합니다. 첫 로그인에서는 본인의 인증 앱으로 TOTP를 설정합니다. 기존 직원은 등록한 인증 앱을 계속 사용합니다. 복구 코드 8개는 최초 설정 때 한 번 표시합니다.
+4. 아직 등록되지 않은 계정은 접근 요청만 제출할 수 있습니다. 역할 없는 `pending` 상태에서는 업무 데이터에 접근할 수 없으며, 관리자가 Staff에서 역할을 부여하고 활성화해야 합니다.
+5. 퇴사·접근 중지 시 Staff에서 비활성화합니다. 역할 변경과 비활성화는 기존 업무 세션을 즉시 해제합니다.
 
-앱에서 직원 권한을 등록하는 작업은 초대 메일을 보내거나 Cloudflare 정책을 자동 변경하지 않습니다. Access 이메일 허용과 앱 승인이 모두 필요합니다. 퇴사자는 앱에서 비활성화하고 Access 허용 목록에서도 제거하세요.
+Google 로그인 자체는 직원 승인이나 관리자 권한을 부여하지 않습니다. 서버가 서명된 Access 신원과 활성 Staff 등록, 계정 연결, MFA 및 요청별 역할을 확인합니다. 앱의 직원 등록은 초대 메일을 보내지 않습니다. Google 프로젝트와 검증 범위는 [Google 로그인 구성 기록](docs/google-sign-in.md)을 참조하세요.
 
 역할은 관리자, Intake, RN-QA, Case Manager, Billing, Physician, 조회 전용이며 복수 선택이 가능합니다. 관리자가 간호 검토·청구 릴리스 권한까지 자동으로 갖지는 않습니다. 의사 단독 역할은 배정 환자만 조회합니다. 역할 변경·비활성화는 기존 업무 세션을 해제하고, 최초 관리자의 관리자 접근은 보호합니다.
 

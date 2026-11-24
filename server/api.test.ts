@@ -14,8 +14,36 @@ async function accessToken(env:Env,who:Who,claims:Record<string,unknown>={},key=
 function fixture(){const db=new TestDatabase();const env:Env={DB:db,DATA_ENCRYPTION_KEY:'11'.repeat(32),OWNER_EMAIL:'owner@example.test',SITE_ORIGIN:'https://office.example.test',CF_ACCESS_TEAM_DOMAIN:'hospice-test.cloudflareaccess.com',CF_ACCESS_AUD:'test-access-audience'};const owner:Who={id:'trusted-owner',email:env.OWNER_EMAIL,name:'테스트 관리자'};return {db,env,owner};}
 async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={'Accept-Language':who?.locale||'ko'};if(who){headers['Cf-Access-Jwt-Assertion']=await accessToken(env,who);if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
 async function enroll(env:Env,who:Who){const start=await call(env,who,'/api/auth/start','POST',{});assert.equal(start.status,200);who.cookie=start.cookie;const setup=await call(env,who,'/api/auth/enrollment');assert.equal(setup.status,200);const code=await totp(setup.body.secret,Math.floor(Date.now()/30000));const verify=await call(env,who,'/api/auth/verify','POST',{code});assert.equal(verify.status,200);return {secret:setup.body.secret,codes:verify.body.recoveryCodes as string[]};}
+const sortedById=<T extends {id:string}>(rows:T[])=>[...rows].sort((a,b)=>a.id.localeCompare(b.id));
 async function command(env:Env,who:Who,cmd:unknown,version?:number,requestId=crypto.randomUUID()){const snapshot=version===undefined?await call(env,who,'/api/workspace'):null;return call(env,who,'/api/commands','POST',{requestId,version:version??snapshot!.body.version,command:cmd});}
 async function staff(env:Env,who:Who,name:string,role:string){const snap=await call(env,who,'/api/workspace');const email=`${role}@example.test`;const result=await call(env,who,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email,name,roles:[role],patientIds:[],status:'active'}});assert.equal(result.status,200);const member:Who={id:`trusted-${role}`,email,name};await enroll(env,member);return member;}
+
+test('STAFF LOGIN: registered email admits a verified identity with its assigned role only after MFA',async()=>{
+ const {db,env,owner}=fixture();
+ try{
+  await enroll(env,owner);
+  const worker:Who={id:'google-staff-user',email:'Staff.Member@Example.Test',name:'Staff Member'};
+  assert.equal((await call(env,worker,'/api/auth/start','POST',{})).status,403);
+  const snap=await call(env,owner,'/api/workspace');
+  const registered=await call(env,owner,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email:worker.email,name:worker.name,roles:['read_only'],patientIds:[],status:'active'}});
+  assert.equal(registered.status,200);
+  assert.equal((await call(env,worker,'/api/auth/session')).body.phase,'start');
+  assert.equal((await call(env,worker,'/api/workspace')).status,401);
+  const start=await call(env,worker,'/api/auth/start','POST',{});
+  assert.equal(start.body.phase,'enroll');worker.cookie=start.cookie;
+  assert.equal((await call(env,worker,'/api/workspace')).body.error.code,'mfa_required');
+  const setup=await call(env,worker,'/api/auth/enrollment');
+  const verified=await call(env,worker,'/api/auth/verify','POST',{code:await totp(setup.body.secret,Math.floor(Date.now()/30000))});
+  assert.equal(verified.status,200);
+  const workspace=await call(env,worker,'/api/workspace');
+  assert.equal(workspace.status,200);
+  assert.deepEqual(workspace.body.actor.roles,['read_only']);
+  assert.equal(workspace.body.actor.email,'staff.member@example.test');
+  const differentUser:Who={id:'another-google-user',email:'different@example.test',name:worker.name,cookie:worker.cookie};
+  assert.equal((await call(env,differentUser,'/api/workspace')).status,401);
+  assert.equal((await call(env,differentUser,'/api/auth/start','POST',{email:worker.email})).status,403);
+ }finally{db.close();}
+});
 
 test('SEC: anonymous, uninvited and forged client identities are denied',async()=>{const {db,env,owner}=fixture();try{assert.equal((await call(env,undefined,'/api/workspace')).status,401);assert.equal((await call(env,{id:'attacker',email:'other@example.test',name:'other'},'/api/auth/start','POST',{email:owner.email})).status,403);const response=await handleApi(new Request(env.SITE_ORIGIN+'/api/workspace',{headers:{'OAI-Sites-Authorization':'Bearer test'}}),env);assert.equal(response.status,401);}finally{db.close();}});
 test('SEC: enrollment required, secret encrypted, recovery codes single-use',async()=>{const {db,env,owner}=fixture();try{const start=await call(env,owner,'/api/auth/start','POST',{});owner.cookie=start.cookie;assert.equal((await call(env,owner,'/api/workspace')).status,401);const setup=await call(env,owner,'/api/auth/enrollment');const code=await totp(setup.body.secret,Math.floor(Date.now()/30000));const verified=await call(env,owner,'/api/auth/verify','POST',{code});assert.equal(verified.status,200);assert.equal(verified.body.recoveryCodes.length,8);const row=db.sqlite.prepare('SELECT mfa_secret FROM members').get()!;assert.ok(!String(row.mfa_secret).includes(setup.body.secret));await call(env,owner,'/api/auth/logout','POST',{});const second=await call(env,owner,'/api/auth/start','POST',{});owner.cookie=second.cookie;assert.equal((await call(env,owner,'/api/auth/verify','POST',{code})).status,422);const backup=verified.body.recoveryCodes[0];assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:backup})).status,200);await call(env,owner,'/api/auth/logout','POST',{});owner.cookie=(await call(env,owner,'/api/auth/start','POST',{})).cookie;assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:backup})).status,422);assert.equal((await call(env,owner,'/api/workspace')).status,401);}finally{db.close();}});
@@ -109,7 +137,7 @@ test('CENSUS API: admin MFA, append-only data, duplicate protection and audit lo
   const before=(await call(env,owner,'/api/workspace')).body;
   const result=await command(env,owner,{type:'samples.census'});assert.equal(result.status,200);assert.equal(result.body.data.patients.length,before.data.patients.length+38);
   for(const p of before.data.patients)assert.deepEqual(result.body.data.patients.find((r:{id:string})=>r.id===p.id),p);
-  assert.deepEqual(result.body.data.claims,before.data.claims);
+  assert.deepEqual(sortedById(result.body.data.claims),sortedById(before.data.claims));
   assert.equal((await command(env,owner,{type:'samples.census'})).status,409);
   assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='가상 Census 데모 추가'").get()!.n,1);
   assert.equal((await command(env,owner,{type:'samples.census',patients:[]})).status,422);
@@ -125,7 +153,7 @@ test('ORDERS API: encrypted persistence, scoped reads, least privilege, recent M
   assert.equal((await call(env,owner,'/api/auth/verify','POST',{code:enrolled.codes[0]})).status,200);
   const requestId=crypto.randomUUID(),version=original.body.version;
   const seeded=await command(env,owner,{type:'samples.orders'},version,requestId);assert.equal(seeded.status,200);assert.equal(seeded.body.data.orders.length,24);
-  assert.deepEqual(seeded.body.data.patients,original.body.data.patients);
+  assert.deepEqual(sortedById(seeded.body.data.patients),sortedById(original.body.data.patients));
   assert.equal((await command(env,owner,{type:'samples.orders'},version,requestId)).status,200);
   assert.equal((await command(env,owner,{type:'samples.orders'})).status,409);
   assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM records WHERE kind='orders'").get()!.n,24);
@@ -141,7 +169,7 @@ test('ORDERS API: encrypted persistence, scoped reads, least privilege, recent M
   db.sqlite.prepare('UPDATE sessions SET verified_at=?').run(Date.now()-301000);
   const updated=await command(env,intake,{type:'order.status',orderId:order.id,status:'received'});assert.equal(updated.status,200);
   const reloaded=await call(env,owner,'/api/workspace');assert.equal(reloaded.body.data.orders.find((o:{id:string})=>o.id===order.id).status,'received');
-  assert.deepEqual(reloaded.body.data.patients,original.body.data.patients);assert.equal((await command(env,intake,{type:'order.status',orderId:order.id,status:'confirmed'})).status,409);
+  assert.deepEqual(sortedById(reloaded.body.data.patients),sortedById(original.body.data.patients));assert.equal((await command(env,intake,{type:'order.status',orderId:order.id,status:'confirmed'})).status,409);
   assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='order.auditDemo'").get()!.n,1);
  }finally{db.close();}
 });
@@ -150,7 +178,7 @@ test('LEDGER API: encrypted append-only records and financial access are enforce
  const {db,env,owner}=fixture();try{
   await enroll(env,owner);await command(env,owner,{type:'samples.census'});const before=await call(env,owner,'/api/workspace');
   const seeded=await command(env,owner,{type:'samples.billing'});assert.equal(seeded.status,200);assert.equal(seeded.body.data.billingWorksheets.length,38);assert.equal(seeded.body.data.billedClaims.length,12);
-  assert.deepEqual(seeded.body.data.patients,before.body.data.patients);assert.deepEqual(seeded.body.data.tasks,before.body.data.tasks);
+  assert.deepEqual(sortedById(seeded.body.data.patients),sortedById(before.body.data.patients));assert.deepEqual(sortedById(seeded.body.data.tasks),sortedById(before.body.data.tasks));
   assert.equal((await command(env,owner,{type:'samples.billing'})).status,409);
   const raw=db.sqlite.prepare("SELECT ciphertext FROM records WHERE kind='billedClaims' LIMIT 1").get()!;assert.ok(!String(raw.ciphertext).includes('DEMO-CLAIM'));
   const viewer=await staff(env,owner,'Financial reviewer','read_only');assert.equal((await call(env,viewer,'/api/workspace')).body.data.billedClaims.length,12);assert.equal((await command(env,viewer,{type:'billing.claim',claim:{id:'forbidden-claim',patientId:seeded.body.data.patients[0].id,reference:'DEMO-QA',from:'2026-11-23',to:'2026-11-23',billed:1000}})).status,403);
@@ -181,6 +209,6 @@ test('LEDGER API: payer advice does not confirm cash; positive bank matching req
   const newBatch={id:'qa-ra',reference:'DEMO-QA-RA',date:seeded.body.data.referenceDate,trace:'DEMO-QA-TRACE',method:'ACH',netPayment:100000,providerAdjustment:0,source:{file:'DEMO-QA.835',hash:'qa-era',row:1,synthetic:true},lines:[{id:'qa-line',patientId:priorClaim.patientId,controlNumber:priorClaim.reference,payerClaimNumber:'DEMO-QA-ICN',from:priorClaim.from,to:priorClaim.to,billed:priorClaim.billed,paid:100000,responsibility:0,adjustments:[],remarks:[],status:'1'}]};
   const imported=await command(env,owner,{type:'billing.remit',batch:newBatch});assert.equal(imported.status,200);assert.equal(imported.body.data.paymentBatches.find((b:{id:string})=>b.id==='qa-ra').bank,undefined);
   assert.equal((await command(env,owner,{type:'billing.remit',batch:{...newBatch,id:'qa-ra-duplicate',reference:'DEMO-OTHER-RA',trace:'DEMO-OTHER-TRACE',source:{...newBatch.source,hash:'other-era'}}})).status,409);
-  assert.deepEqual(imported.body.data.claims,seeded.body.data.claims);assert.deepEqual(imported.body.data.patients,seeded.body.data.patients);
+  assert.deepEqual(sortedById(imported.body.data.claims),sortedById(seeded.body.data.claims));assert.deepEqual(sortedById(imported.body.data.patients),sortedById(seeded.body.data.patients));
  }finally{db.close();}
 });

@@ -20,7 +20,7 @@ export async function identity(request: Request, env: Env): Promise<Identity> {
 
 async function verify(request: Request, domain: string, audience: string): Promise<Identity> {
   const token = request.headers.get('Cf-Access-Jwt-Assertion');
-  assert(token && token.length <= 16384, 401, 'sign_in_required', '초대된 직원 이메일로 로그인해 주세요.');
+  assert(token && token.length <= 16384, 401, 'sign_in_required', 'Staff에 등록된 Google 계정으로 로그인해 주세요.');
   const issuer = `https://${domain}`;
   let keys = keySets.get(domain);
   if (!keys) {
