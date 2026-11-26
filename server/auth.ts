@@ -6,6 +6,9 @@ import { identity } from './identity.ts';
 
 export const COOKIE='__Host-eh-session';
 type SessionRow={hash:string;member_id:string;user_id:string;created_at:number;last_seen:number;verified_at:number|null;expires_at:number;enrollment:string|null};
+// Only the explicitly configured synthetic-data environment may pause app MFA.
+// Missing/invalid flags and PHI approval always restore the normal requirement.
+export function requiresMfa(env:Env){return env.APP_MFA_REQUIRED!=='false'||env.PHI_PROCESSING_APPROVED!=='false';}
 export function verifyOrigin(request:Request,env:Env){const origin=request.headers.get('Origin');assert(origin===env.SITE_ORIGIN,403,'invalid_origin','같은 사이트에서 시작한 요청만 허용합니다.');assert(!request.headers.get('Sec-Fetch-Site')||request.headers.get('Sec-Fetch-Site')==='same-origin',403,'invalid_origin','외부 사이트의 요청은 허용하지 않습니다.');}
 export const cookie=(token:string,maxAge=28800)=>`${COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 function token(request:Request){const value=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${COOKIE}=`))?.slice(COOKIE.length+1);return value&&/^[a-f0-9]{64}$/.test(value)?value:null;}
@@ -14,14 +17,24 @@ export async function readSession(request:Request,env:Env,allowPending=false){
  const who=await identity(request,env),raw=token(request);assert(raw,401,'session_required','업무 세션을 시작해 주세요.');
  const s=await env.DB.prepare('SELECT * FROM sessions WHERE hash = ?').bind(await sha256(raw)).first<SessionRow>();const now=Date.now();assert(s&&s.user_id===who.userId&&s.expires_at>now&&s.created_at+28800000>now&&s.last_seen+900000>now,401,'session_expired','15분 유휴 또는 8시간 세션이 만료되었습니다. 다시 인증해 주세요.');
  const m=await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(s.member_id).first<MemberRow>();assert(m&&m.status==='active'&&m.user_id===who.userId&&m.email===who.email,403,'access_revoked','직원 접근 권한이 해제되었거나 변경되었습니다.');
- assert(allowPending||s.verified_at,401,'mfa_required','인증 앱의 6자리 코드를 입력하세요.');
- if(!s.verified_at)assert(s.created_at+600000>now,401,'challenge_expired','인증 시간이 만료되었습니다. 다시 시작하세요.');
+ if(requiresMfa(env)){
+  assert(allowPending||s.verified_at,401,'mfa_required','인증 앱의 6자리 코드를 입력하세요.');
+  if(!s.verified_at)assert(s.created_at+600000>now,401,'challenge_expired','인증 시간이 만료되었습니다. 다시 시작하세요.');
+ }
  await env.DB.prepare('UPDATE sessions SET last_seen = ? WHERE hash = ?').bind(now,s.hash).run();
  return {session:s,member:m,actor:asActor(m)};
 }
-export function requireRecent(session:SessionRow){assert(session.verified_at&&Date.now()-session.verified_at<300000,428,'reauth_required','민감한 작업입니다. 인증 앱 코드로 본인 확인을 다시 해 주세요.');}
+export function requireRecent(session:SessionRow,env:Env){if(requiresMfa(env))assert(session.verified_at&&Date.now()-session.verified_at<300000,428,'reauth_required','민감한 작업입니다. 인증 앱 코드로 본인 확인을 다시 해 주세요.');}
 export async function limit(env:Env,key:string,max=5){const now=Date.now();const row=await env.DB.prepare('INSERT INTO attempts (key,count,window) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN window < ? THEN 1 ELSE count+1 END, window=CASE WHEN window < ? THEN excluded.window ELSE window END RETURNING count, window').bind(key,now,now-900000,now-900000).first<{count:number;window:number}>();assert(row&&row.count<=max,429,'rate_limited','인증 시도가 많습니다. 15분 뒤 다시 시도하세요.');}
-export async function startSession(request:Request,env:Env){verifyOrigin(request,env);const m=await getMember(request,env,true);await limit(env,`start:${m.id}`,20);const raw=randomHex(),hash=await sha256(raw),now=Date.now();await env.DB.prepare('INSERT INTO sessions (hash,member_id,user_id,created_at,last_seen,expires_at) VALUES (?,?,?,?,?,?)').bind(hash,m.id,m.user_id,now,now,now+28800000).run();await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now-86400000).run();return {token:raw,phase:m.mfa_secret?'mfa':'enroll',email:m.email};}
+export async function startSession(request:Request,env:Env){
+ verifyOrigin(request,env);const m=await getMember(request,env,true);await limit(env,`start:${m.id}`,20);
+ const raw=randomHex(),hash=await sha256(raw),now=Date.now(),mfaRequired=requiresMfa(env);
+ await env.DB.prepare('INSERT INTO sessions (hash,member_id,user_id,created_at,last_seen,expires_at) VALUES (?,?,?,?,?,?)').bind(hash,m.id,m.user_id,now,now,now+28800000).run();
+ await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now-86400000).run();
+ if(!mfaRequired)await logAudit(env,asActor(m),'시험 운영 로그인',m.id,'인증 앱 확인 일시 중지 · Google 로그인과 직원 권한 확인');
+ // A test session must never be recorded as an actual MFA verification.
+ return {token:raw,phase:mfaRequired?(m.mfa_secret?'mfa':'enroll'):'ready',email:m.email,mfaRequired};
+}
 export async function enrollment(request:Request,env:Env){const {member:m,session:s}=await readSession(request,env,true);assert(!m.mfa_secret&&!s.verified_at,409,'already_enrolled','이미 2단계 인증이 설정되어 있습니다.');let secret:string;if(s.enrollment)secret=await decrypt<string>(s.enrollment,env.DATA_ENCRYPTION_KEY,`enrollment:${s.hash}`);else{secret=totpSecret();const encrypted=await encrypt(secret,env.DATA_ENCRYPTION_KEY,`enrollment:${s.hash}`);await env.DB.prepare('UPDATE sessions SET enrollment = ? WHERE hash = ? AND enrollment IS NULL').bind(encrypted,s.hash).run();const saved=await env.DB.prepare('SELECT enrollment FROM sessions WHERE hash = ?').bind(s.hash).first<{enrollment:string}>();secret=await decrypt<string>(saved!.enrollment,env.DATA_ENCRYPTION_KEY,`enrollment:${s.hash}`);}return {secret,uri:`otpauth://totp/${encodeURIComponent('Eminent Hospice:'+m.email)}?secret=${secret}&issuer=Eminent%20Hospice&algorithm=SHA1&digits=6&period=30`};}
 export async function verifyMfa(request:Request,env:Env,code:string){
  const {member:m,session:s,actor}=await readSession(request,env,true);await limit(env,`mfa:${m.id}`);const now=Date.now(),statements=[];let recoveryCodes:string[]|undefined;

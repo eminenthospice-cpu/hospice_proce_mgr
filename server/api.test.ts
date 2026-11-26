@@ -15,6 +15,66 @@ function fixture(){const db=new TestDatabase();const env:Env={DB:db,DATA_ENCRYPT
 async function call(env:Env,who:Who|undefined,path:string,method='GET',value?:unknown,origin=env.SITE_ORIGIN){const headers:Record<string,string>={'Accept-Language':who?.locale||'ko'};if(who){headers['Cf-Access-Jwt-Assertion']=await accessToken(env,who);if(who.cookie)headers.Cookie=who.cookie;}if(method!=='GET'){headers.Origin=origin;headers['Content-Type']='application/json';}const response=await handleApi(new Request(env.SITE_ORIGIN+path,{method,headers,body:value===undefined?undefined:JSON.stringify(value)}),env);return {status:response.status,body:await response.json(),cookie:response.headers.get('Set-Cookie')?.split(';')[0]};}
 async function enroll(env:Env,who:Who){const start=await call(env,who,'/api/auth/start','POST',{});assert.equal(start.status,200);who.cookie=start.cookie;const setup=await call(env,who,'/api/auth/enrollment');assert.equal(setup.status,200);const code=await totp(setup.body.secret,Math.floor(Date.now()/30000));const verify=await call(env,who,'/api/auth/verify','POST',{code});assert.equal(verify.status,200);return {secret:setup.body.secret,codes:verify.body.recoveryCodes as string[]};}
 const sortedById=<T extends {id:string}>(rows:T[])=>[...rows].sort((a,b)=>a.id.localeCompare(b.id));
+
+test('TEST MFA PAUSE: active staff can enter synthetic mode without false MFA proof; roles and identity remain enforced',async()=>{
+ const {db,env,owner}=fixture();const testing={...env,APP_MFA_REQUIRED:'false',PHI_PROCESSING_APPROVED:'false'};
+ try{
+  const start=await call(testing,owner,'/api/auth/start','POST',{});
+  assert.equal(start.status,200);assert.equal(start.body.phase,'ready');assert.equal(start.body.mfaRequired,false);owner.cookie=start.cookie;
+  assert.equal((await call(testing,owner,'/api/auth/session')).body.phase,'ready');
+  assert.equal((await call(testing,owner,'/api/workspace')).body.mfaRequired,false);
+  const proof=db.sqlite.prepare('SELECT verified_at,enrollment FROM sessions').get()!;
+  assert.equal(proof.verified_at,null);assert.equal(proof.enrollment,null);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='시험 운영 로그인'").get()!.n,1);
+  assert.equal((await command(testing,owner,{type:'samples.load'})).status,200);
+  const snap=await call(testing,owner,'/api/workspace');
+  const registered=await call(testing,owner,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email:'test-viewer@example.test',name:'Test viewer',roles:['read_only'],patientIds:[],status:'active'}});
+  assert.equal(registered.status,200);
+  const viewer:Who={id:'test-viewer',email:'test-viewer@example.test',name:'Test viewer'};
+  const viewerStart=await call(testing,viewer,'/api/auth/start','POST',{});viewer.cookie=viewerStart.cookie;
+  assert.equal(viewerStart.body.phase,'ready');
+  assert.deepEqual((await call(testing,viewer,'/api/workspace')).body.actor.roles,['read_only']);
+  assert.equal((await call(testing,viewer,'/api/staff','POST',{})).status,403);
+  assert.equal((await command(testing,viewer,{type:'samples.census'})).status,403);
+  assert.equal((await call(testing,undefined,'/api/workspace')).status,401);
+  assert.equal((await call(testing,{id:'unknown',email:'unknown@example.test',name:'Unknown'},'/api/auth/start','POST',{})).status,403);
+  assert.equal((await call(testing,{...viewer,id:'different-id'},'/api/workspace')).status,401);
+  assert.equal((await call(testing,owner,'/api/auth/start','POST',{},'https://outside.example.test')).status,403);
+  const member=registered.body.members.find((m:{email:string})=>m.email===viewer.email);
+  const current=await call(testing,owner,'/api/workspace');
+  assert.equal((await call(testing,owner,'/api/staff','POST',{requestId:crypto.randomUUID(),version:current.body.version,member:{id:member.id,email:member.email,name:member.name,roles:member.roles,patientIds:[],status:'disabled'}})).status,200);
+  assert.notEqual((await call(testing,viewer,'/api/workspace')).status,200);
+ }finally{db.close();}
+});
+
+test('TEST MFA PAUSE: restoring MFA or enabling PHI rejects test sessions and preserves existing authenticator credentials',async()=>{
+ const {db,env,owner}=fixture();const testing={...env,APP_MFA_REQUIRED:'false',PHI_PROCESSING_APPROVED:'false'};
+ try{
+  await enroll(env,owner);
+  const existing=db.sqlite.prepare('SELECT mfa_secret FROM members WHERE email=?').get(owner.email)!.mfa_secret;
+  const recoveryCount=db.sqlite.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE used_at IS NULL').get()!.n;
+  const started=await call(testing,owner,'/api/auth/start','POST',{});owner.cookie=started.cookie;
+  assert.equal(started.body.phase,'ready');
+  for(const secured of [
+   {...testing,APP_MFA_REQUIRED:'true'},
+   {...testing,APP_MFA_REQUIRED:undefined},
+   {...testing,APP_MFA_REQUIRED:'invalid'},
+   {...testing,PHI_PROCESSING_APPROVED:'true'},
+   {...testing,PHI_PROCESSING_APPROVED:undefined},
+   {...testing,PHI_PROCESSING_APPROVED:'invalid'},
+  ]){
+   const denied=await call(secured,owner,'/api/workspace');assert.equal(denied.status,401);assert.equal(denied.body.error.code,'mfa_required');
+   const auth=await call(secured,owner,'/api/auth/session');assert.equal(auth.body.phase,'mfa');assert.equal(auth.body.mfaRequired,true);
+   assert.equal((await call(secured,owner,'/api/staff','POST',{})).status,401);
+  }
+  assert.equal(db.sqlite.prepare('SELECT mfa_secret FROM members WHERE email=?').get(owner.email)!.mfa_secret,existing);
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM recovery_codes WHERE used_at IS NULL').get()!.n,recoveryCount);
+  db.sqlite.prepare('UPDATE sessions SET created_at=?,last_seen=? WHERE verified_at IS NULL').run(Date.now()-660000,Date.now());
+  assert.equal((await call(testing,owner,'/api/workspace')).status,200);
+  db.sqlite.prepare('UPDATE sessions SET last_seen=? WHERE verified_at IS NULL').run(Date.now()-901000);
+  assert.equal((await call(testing,owner,'/api/workspace')).status,401);
+ }finally{db.close();}
+});
 async function command(env:Env,who:Who,cmd:unknown,version?:number,requestId=crypto.randomUUID()){const snapshot=version===undefined?await call(env,who,'/api/workspace'):null;return call(env,who,'/api/commands','POST',{requestId,version:version??snapshot!.body.version,command:cmd});}
 async function staff(env:Env,who:Who,name:string,role:string){const snap=await call(env,who,'/api/workspace');const email=`${role}@example.test`;const result=await call(env,who,'/api/staff','POST',{requestId:crypto.randomUUID(),version:snap.body.version,member:{email,name,roles:[role],patientIds:[],status:'active'}});assert.equal(result.status,200);const member:Who={id:`trusted-${role}`,email,name};await enroll(env,member);return member;}
 

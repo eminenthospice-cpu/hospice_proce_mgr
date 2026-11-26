@@ -1137,5 +1137,17 @@
   "ledger.state.offset": "Offset · net payment zero",
   "ledger.state.review": "Amounts / adjustments need review",
   "ledger.correctDate": "Enter date after reviewing original; original value is preserved",
-  "ledger.sourceDate": "Source date"
+  "ledger.sourceDate": "Source date",
+  "시험 운영 중에는 Google 로그인과 Staff 권한을 확인한 뒤 인증 앱 없이 입장합니다.": "During testing, sign in with Google and your active Staff account without an authenticator app.",
+  "Google 로그인 · 직원 권한 · 시험 운영": "Google sign-in · Staff permissions · Test mode",
+  "시험 운영 · 2FA 일시 중지": "Test mode · 2FA temporarily paused",
+  "Google 로그인": "Google sign-in",
+  "시험 운영 · Staff 역할 기준": "Test mode · Staff role permissions apply",
+  "시험 운영 중 생략": "Skipped during testing",
+  "Google 계정 이메일과 역할을 확인한 후 저장하세요.": "Confirm the Google account email and roles before saving.",
+  "Staff에 Google 계정 이메일과 역할을 등록하고 활성으로 저장하면 직원이 로그인할 수 있습니다. 시험 운영 중에는 인증 앱 설정을 건너뜁니다.": "Register the Google account email and role in Staff and save the account as active so the staff member can sign in. Authenticator setup is skipped during testing.",
+  "시험 운영": "Test mode",
+  "배치 추가 시 서버가 현재 직원 권한을 확인합니다. 시험 운영 중에는 인증 앱 확인을 생략합니다.": "The server checks staff permissions before adding claims to a batch. Authenticator verification is skipped during testing.",
+  "시험 운영 로그인": "Test-mode sign-in",
+  "인증 앱 확인 일시 중지 · Google 로그인과 직원 권한 확인": "Authenticator verification temporarily paused · Google sign-in and staff permissions checked"
 }

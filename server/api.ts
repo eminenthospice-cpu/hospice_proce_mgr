@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { can, roleLabels, type Actor, type WorkspaceSession } from '../lib/permissions.ts';
 import { commandSchema, reduceCommand, canSeePatient } from './commands.ts';
 import { ApiError, assert, type Env } from './types.ts';
-import { readSession, verifyOrigin, startSession, enrollment, verifyMfa, logout, cookie, requireRecent,limit } from './auth.ts';
+import { readSession, verifyOrigin, startSession, enrollment, verifyMfa, logout, cookie, requireRecent,limit,requiresMfa } from './auth.ts';
 import { identity } from './identity.ts';
 import { AGENCY_ID, asStaff, memberByIdentity, readWorkspace, filteredState, logAudit, commitState, commandFingerprint, type MemberRow } from './store.ts';
 import { randomHex } from './crypto.ts';
@@ -18,7 +18,7 @@ async function body(request:Request){
  try{return JSON.parse(new TextDecoder().decode(bytes));}catch{throw new ApiError(400,'invalid_json','요청 형식을 확인하세요.');}
 }
 const json=(value:unknown,status=200,headers?:HeadersInit)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store, private','Pragma':'no-cache',...headers}});
-async function snapshot(env:Env,actor:Actor){const {state,version}=await readWorkspace(env,actor.agencyId);const rows=await env.DB.prepare('SELECT * FROM members WHERE agency_id = ? ORDER BY created_at').bind(actor.agencyId).all<MemberRow>();const full=can(actor.roles,'staff.manage');const members=rows.results.filter(r=>full||r.status==='active').map(asStaff).map(s=>full?s:{...s,email:'',patientIds:[]});const session:WorkspaceSession={actor,members,version,phiAllowed:env.PHI_PROCESSING_APPROVED==='true',database:'Cloudflare D1'};return {data:await filteredState(env,actor,state),...session};}
+async function snapshot(env:Env,actor:Actor){const {state,version}=await readWorkspace(env,actor.agencyId);const rows=await env.DB.prepare('SELECT * FROM members WHERE agency_id = ? ORDER BY created_at').bind(actor.agencyId).all<MemberRow>();const full=can(actor.roles,'staff.manage');const members=rows.results.filter(r=>full||r.status==='active').map(asStaff).map(s=>full?s:{...s,email:'',patientIds:[]});const session:WorkspaceSession={actor,members,version,phiAllowed:env.PHI_PROCESSING_APPROVED==='true',mfaRequired:requiresMfa(env),database:'Cloudflare D1'};return {data:await filteredState(env,actor,state),...session};}
 export async function handleApi(request:Request,env:Env):Promise<Response>{
  return localizeErrorResponse(await handleApiInternal(request,env),request);
 }
@@ -26,7 +26,7 @@ async function handleApiInternal(request:Request,env:Env):Promise<Response>{
  let actor:Actor|undefined;const requestId=randomHex(8);const path=new URL(request.url).pathname;
  try{
   assert(env.DB&&env.DATA_ENCRYPTION_KEY&&env.OWNER_EMAIL&&env.SITE_ORIGIN,503,'not_configured','서버 DB·암호화·관리자 설정이 준비되지 않았습니다.');
-  if(path==='/api/health'&&request.method==='GET'){await identity(request,env);const row=await env.DB.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('agencies','members','records','sessions','audit_events','transaction_guards')").first<{count:number}>();return json({ok:row?.count===6,database:'D1',schema:1,authentication:'Cloudflare Access + TOTP',phiProcessing:env.PHI_PROCESSING_APPROVED==='true'},row?.count===6?200:503);}
+  if(path==='/api/health'&&request.method==='GET'){await identity(request,env);const row=await env.DB.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('agencies','members','records','sessions','audit_events','transaction_guards')").first<{count:number}>();return json({ok:row?.count===6,database:'D1',schema:1,authentication:requiresMfa(env)?'Cloudflare Access + TOTP':'Cloudflare Access (test mode)',mfaRequired:requiresMfa(env),phiProcessing:env.PHI_PROCESSING_APPROVED==='true'},row?.count===6?200:503);}
   if(request.method!=='GET')verifyOrigin(request,env);
   if(path==='/api/auth/request-access'&&request.method==='POST'){
    const who=await identity(request,env);await limit(env,`request:${who.userId}`,3);
@@ -36,13 +36,13 @@ async function handleApiInternal(request:Request,env:Env):Promise<Response>{
     env.DB.prepare('INSERT OR IGNORE INTO members (id,agency_id,email,user_id,name,roles,patient_ids,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(`member-${randomHex(16)}`,AGENCY_ID,who.email,who.userId,who.name,'[]','[]','pending',new Date().toISOString()),
    ]);return json({phase:'pending',email:who.email});
   }
-  if(path==='/api/auth/start'&&request.method==='POST'){const result=await startSession(request,env);return json({phase:result.phase,email:result.email},200,{'Set-Cookie':cookie(result.token)});}
+  if(path==='/api/auth/start'&&request.method==='POST'){const result=await startSession(request,env);return json({phase:result.phase,email:result.email,mfaRequired:result.mfaRequired},200,{'Set-Cookie':cookie(result.token)});}
   if(path==='/api/auth/enrollment'&&request.method==='GET')return json(await enrollment(request,env));
   if(path==='/api/auth/verify'&&request.method==='POST'){const input=z.object({code:z.string().min(6).max(16)}).strict().parse(await body(request));return json(await verifyMfa(request,env,input.code));}
   if(path==='/api/auth/logout'&&request.method==='POST'){await logout(request,env);return json({ok:true},200,{'Set-Cookie':cookie('',0)});}
   if(path==='/api/auth/session'&&request.method==='GET'){
-   const who=await identity(request,env);try{const s=await readSession(request,env,true);if(!s.session.verified_at)return json({phase:s.member.mfa_secret?'mfa':'enroll',email:who.email});return json({phase:'ready',actor:s.actor});}
-   catch(error){if(error instanceof ApiError&&error.status===401){const m=await memberByIdentity(env,who.userId,who.email);if(m?.status==='disabled')throw new ApiError(403,'access_revoked','관리자가 접근을 해제한 계정입니다.');return json({phase:m?.status==='pending'?'pending':m?.status==='active'||who.email===env.OWNER_EMAIL.toLowerCase()?'start':'request',email:who.email});}throw error;}
+   const who=await identity(request,env);try{const s=await readSession(request,env,true);if(requiresMfa(env)&&!s.session.verified_at)return json({phase:s.member.mfa_secret?'mfa':'enroll',email:who.email,mfaRequired:true});return json({phase:'ready',actor:s.actor,mfaRequired:requiresMfa(env)});}
+   catch(error){if(error instanceof ApiError&&error.status===401){const m=await memberByIdentity(env,who.userId,who.email);if(m?.status==='disabled')throw new ApiError(403,'access_revoked','관리자가 접근을 해제한 계정입니다.');return json({phase:m?.status==='pending'?'pending':m?.status==='active'||who.email===env.OWNER_EMAIL.toLowerCase()?'start':'request',email:who.email,mfaRequired:requiresMfa(env)});}throw error;}
   }
   const auth=await readSession(request,env);actor=auth.actor;
   if(path==='/api/workspace'&&request.method==='GET'){await logAudit(env,actor,'워크스페이스 조회','workspace');return json(await snapshot(env,actor));}
@@ -52,7 +52,7 @@ async function handleApiInternal(request:Request,env:Env):Promise<Response>{
    const input=envelope.parse(await body(request)),hash=await commandFingerprint(input.command);
    const receipt=await env.DB.prepare('SELECT command_hash,member_id FROM command_receipts WHERE agency_id = ? AND request_id = ?').bind(actor.agencyId,input.requestId).first<{command_hash:string;member_id:string}>();
    if(receipt){assert(receipt.command_hash===hash&&receipt.member_id===actor.id,409,'request_mismatch','요청 식별자가 다른 작업에 사용되었습니다.');return json(await snapshot(env,actor));}
-   if(['claim.release','samples.load','samples.census','samples.orders','samples.billing','billing.bank'].includes(input.command.type)||input.command.type==='audit.record'&&input.command.event==='export')requireRecent(auth.session);
+   if(['claim.release','samples.load','samples.census','samples.orders','samples.billing','billing.bank'].includes(input.command.type)||input.command.type==='audit.record'&&input.command.event==='export')requireRecent(auth.session,env);
    const {state,version}=await readWorkspace(env,actor.agencyId);assert(version===input.version,409,'version_conflict','다른 직원이 먼저 변경했습니다. 최신 데이터를 불러온 뒤 다시 저장하세요.');
    const outcome=reduceCommand(state,actor,input.command,env.PHI_PROCESSING_APPROVED==='true');
    if(input.command.type==='task.create'||input.command.type==='task.assign'||input.command.type==='patient.create'){
@@ -62,7 +62,7 @@ async function handleApiInternal(request:Request,env:Env):Promise<Response>{
    await commitState(env,actor,state,outcome.state,version,input.requestId,hash,outcome.action,outcome.entity,outcome.detail);return json(await snapshot(env,actor));
   }
   if(path==='/api/staff'&&request.method==='POST'){
-   assert(can(actor.roles,'staff.manage'),403,'forbidden','관리자만 직원 접근을 관리할 수 있습니다.');requireRecent(auth.session);
+   assert(can(actor.roles,'staff.manage'),403,'forbidden','관리자만 직원 접근을 관리할 수 있습니다.');requireRecent(auth.session,env);
    const role=z.enum(Object.keys(roleLabels) as [keyof typeof roleLabels,...(keyof typeof roleLabels)[]]);
    const input=z.object({requestId:z.string().uuid(),version:z.number().int().min(0),member:z.object({id:z.string().regex(/^[\w-]+$/).max(100).optional(),email:z.string().email().max(254).transform(e=>e.trim().toLowerCase()),name:z.string().trim().min(1).max(100),roles:z.array(role).min(1).max(7),patientIds:z.array(z.string().regex(/^[\w-]+$/)).max(500),status:z.enum(['active','disabled'])}).strict()}).strict().parse(await body(request));
    assert(new Set(input.member.roles).size===input.member.roles.length,422,'duplicate_roles','역할이 중복되었습니다.');

@@ -46,11 +46,17 @@ Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자�
 - Cloudflare 계정: `Eminenthospice@gmail.com's Account` (`aca0fd772c7c9e078fed7979460d4d28`).
 - 생성한 D1: `eminent-hospice-mgr` (`d86f7ab8-9cb3-48a1-9431-9760a491ac86`). Western North America 배치 힌트이며 데이터 주권 보장은 아닙니다.
 - Worker `eminent-hospice-mgr`를 `https://mgr.eminenthospice.com`에 배포했습니다. D1 마이그레이션 2개가 원격 적용되어 앱 테이블 11개와 감사 보호 트리거 2개를 확인했습니다.
-- Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 Google 로그인만 사용합니다. `Eminent Google sign-in` 정책은 Google에서 확인한 신원을 앱으로 전달하며, 앱이 Staff의 활성 이메일·역할과 MFA를 확인한 후 업무 데이터를 제공합니다. Staff 등록 외에 별도 Access 이메일 등록은 필요하지 않습니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 유지합니다.
-- 최종 Worker 버전: `fdcf806d-cd3f-447b-aedd-ba2861ca0a08` (v1.3.1 · 2026-11-24). 비로그인 화면·업무 API는 Google 계정 선택 화면으로 이동합니다.
-- `slee1005@gmail.com` 관리자가 첫 이메일 인증·TOTP 등록을 완료한 뒤 실제 어드미션 화면에서 관리자·MFA 표시와 Cloudflare D1 연결을 확인했습니다. 다른 직원의 첫 인증 앱 등록도 각 본인이 진행해야 합니다.
+- Cloudflare Access 앱 `Eminent Hospice Management` (`3ce4039e-9558-49a0-8cfc-4ee75663cb4e`)은 Google 로그인만 사용합니다. `Eminent Google sign-in` 정책은 Google에서 확인한 신원을 앱으로 전달하며, 앱이 Staff의 활성 이메일·역할과 적용 중인 인증 정책을 확인한 후 업무 데이터를 제공합니다. Staff 등록 외에 별도 Access 이메일 등록은 필요하지 않습니다. Access 세션은 6시간이며 HttpOnly·Binding Cookie·SameSite=Lax를 유지합니다.
+- 최종 Worker 버전: `27ca8188-9193-4e7b-b550-5fee17d752d5` (v1.3.2 · 2026-11-25). 비로그인 화면·업무 API는 Google 계정 선택 화면으로 이동합니다.
+- `slee1005@gmail.com` 관리자가 첫 이메일 인증·TOTP 등록을 완료한 뒤 실제 어드미션 화면에서 관리자·MFA 표시와 Cloudflare D1 연결을 확인했습니다. 인증 앱 등록이 필요한 운영 모드에서는 각 직원이 본인 휴대폰으로 직접 등록합니다.
 - 기존 Sites의 `records`와 `members`가 비어 있음을 2026-11-22에 확인했습니다. 새 D1에서 시작하며 기존 Sites 앱과 비밀 키는 변경하지 않았습니다. 이후 기존 사이트에 데이터가 추가되면 두 환경을 동시에 업무에 사용하지 말고 이관 범위를 다시 확인하세요.
 - `PHI_PROCESSING_APPROVED=false`입니다. BAA와 Workers·D1·Access의 계약상 적용 범위를 확인하기 전에는 실제 환자정보를 입력하지 마세요.
+
+## 시험 기간의 앱 2FA 일시 중지
+
+2026-11-25 사용자 요청으로 `APP_MFA_REQUIRED=false`, `PHI_PROCESSING_APPROVED=false`를 배포했습니다. 이 두 값이 명시적으로 `false`인 가상 데이터 환경에서만 인증 앱 등록·로그인 코드·민감 작업의 최근 MFA 재확인을 생략합니다. Google 신원 검증, 활성 Staff 등록, 역할·환자 범위, CSRF, 세션 유휴 15분·최대 8시간은 유지합니다. UI는 “시험 운영 · 2FA 일시 중지”를 표시하며 실제 MFA를 통과했다고 표시하지 않습니다.
+
+재활성화는 `APP_MFA_REQUIRED=true`로 변경해 다시 배포합니다. 플래그 누락·오입력 또는 `PHI_PROCESSING_APPROVED=true`도 MFA를 필수 적용합니다. 시험 중 발급된 세션의 `verified_at`은 `NULL`로 남으므로 재활성화 후에는 업무 데이터 접근 전에 MFA를 거쳐야 합니다. 기존 인증 앱 비밀 값과 복구 코드는 삭제·초기화하지 않습니다. Google 자체의 계정 보안 설정은 변경하지 않습니다.
 
 ## 관리자와 초대 직원
 
@@ -58,11 +64,11 @@ Care Operations의 **DME 주문현황 / 약품 주문현황**은 기존 환자�
 
 1. Cloudflare Access 앱의 로그인 방법은 Google 하나로 지정하고, Allow 정책의 `Include → Login Methods`에 해당 Google 제공자를 선택합니다. Bypass 정책은 사용하지 않습니다.
 2. 앱 관리자가 `워크스페이스 설정 → 직원별 접근 권한`에서 직원의 **Google 계정 이메일**, 역할, 활성 상태를 저장합니다. 별도 Cloudflare 이메일 허용 목록은 관리하지 않습니다.
-3. 등록된 직원은 같은 이메일의 Google 계정으로 로그인한 뒤 업무 세션을 시작합니다. 첫 로그인에서는 본인의 인증 앱으로 TOTP를 설정합니다. 기존 직원은 등록한 인증 앱을 계속 사용합니다. 복구 코드 8개는 최초 설정 때 한 번 표시합니다.
+3. 등록된 직원은 같은 이메일의 Google 계정으로 로그인한 뒤 업무 세션을 시작합니다. 현재 시험 모드에서는 인증 앱 등록·코드 입력을 생략합니다. 2FA를 다시 활성화하면 첫 로그인에서 본인의 인증 앱으로 TOTP를 설정합니다. 기존 직원은 등록한 인증 앱을 계속 사용합니다. 복구 코드 8개는 최초 설정 때 한 번 표시합니다.
 4. 아직 등록되지 않은 계정은 접근 요청만 제출할 수 있습니다. 역할 없는 `pending` 상태에서는 업무 데이터에 접근할 수 없으며, 관리자가 Staff에서 역할을 부여하고 활성화해야 합니다.
 5. 퇴사·접근 중지 시 Staff에서 비활성화합니다. 역할 변경과 비활성화는 기존 업무 세션을 즉시 해제합니다.
 
-Google 로그인 자체는 직원 승인이나 관리자 권한을 부여하지 않습니다. 서버가 서명된 Access 신원과 활성 Staff 등록, 계정 연결, MFA 및 요청별 역할을 확인합니다. 앱의 직원 등록은 초대 메일을 보내지 않습니다. Google 프로젝트와 검증 범위는 [Google 로그인 구성 기록](docs/google-sign-in.md)을 참조하세요.
+Google 로그인 자체는 직원 승인이나 관리자 권한을 부여하지 않습니다. 서버가 서명된 Access 신원과 활성 Staff 등록, 계정 연결, 적용 중인 MFA 정책 및 요청별 역할을 확인합니다. 앱의 직원 등록은 초대 메일을 보내지 않습니다. Google 프로젝트와 검증 범위는 [Google 로그인 구성 기록](docs/google-sign-in.md)을 참조하세요.
 
 역할은 관리자, Intake, RN-QA, Case Manager, Billing, Physician, 조회 전용이며 복수 선택이 가능합니다. 관리자가 간호 검토·청구 릴리스 권한까지 자동으로 갖지는 않습니다. 의사 단독 역할은 배정 환자만 조회합니다. 역할 변경·비활성화는 기존 업무 세션을 해제하고, 최초 관리자의 관리자 접근은 보호합니다.
 
@@ -100,7 +106,7 @@ D1 구조의 원본은 `db/schema.ts`, 마이그레이션은 `drizzle/`입니다
 ## 인증·권한·저장
 
 - Access의 RS256 JWT를 공개 JWKS로 검증하며 발급자, 앱 AUD, 만료, nbf, 사용자 이메일을 확인합니다. 이전 Sites 헤더와 서명되지 않은 Cloudflare 이메일 헤더는 신뢰하지 않습니다.
-- 사이트의 정적 자산도 검증을 거칩니다. 업무 API는 별도로 직원 활성 상태와 역할, TOTP를 확인합니다.
+- 사이트의 정적 자산도 검증을 거칩니다. 업무 API는 별도로 직원 활성 상태와 역할, 적용 중인 TOTP 정책을 확인합니다.
 - 업무 쿠키는 HttpOnly·Secure·SameSite=Strict이며 토큰 해시만 DB에 저장합니다. 세션은 유휴 15분·최대 8시간이고 민감 작업에는 최근 5분 이내 MFA가 필요합니다.
 - 업무 레코드는 기관별 AES-256-GCM으로 암호화하며 기관·유형·ID를 AAD로 검증합니다.
 - 서버 명령 API가 청구 게이트, 임상 서명자 역할, F2F 창, POC 승인일과 수납 항등식을 다시 검증합니다. 임의 SQL·전체 상태 업로드 API는 없습니다.

@@ -27,6 +27,7 @@
     "OWNER_EMAIL": "slee1005@gmail.com",
     "SITE_ORIGIN": "https://mgr.eminenthospice.com",
     "PHI_PROCESSING_APPROVED": "false",
+    "APP_MFA_REQUIRED": "false",
     "CF_ACCESS_TEAM_DOMAIN": "frosty-shadow-9706.cloudflareaccess.com",
     "CF_ACCESS_AUD": "60814cb7c1d9fd824ce8ac6a85527f7c9ff64c2b1d89320c29827ff6ed51c9ee"
   },

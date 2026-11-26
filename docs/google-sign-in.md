@@ -1,6 +1,6 @@
 # Google sign-in migration
 
-Status: Google sign-in and Staff-based authorization are deployed on 2026-11-24 (v1.3.1, Worker `fdcf806d-cd3f-447b-aedd-ba2861ca0a08`). Cloudflare confirmed the identity-provider test succeeded after the user completed Google verification. A fresh visit to the actual site reached Google account selection and then the active Staff account’s first authenticator enrollment screen. Enrollment of this account is pending the user’s own phone setup; existing roles and MFA registrations were preserved.
+Status: Google sign-in and Staff-based authorization are deployed on 2026-11-24 (v1.3.1, Worker `fdcf806d-cd3f-447b-aedd-ba2861ca0a08`). Cloudflare confirmed the identity-provider test succeeded after the user completed Google verification. A fresh visit to the actual site reached Google account selection and then the active Staff account’s first authenticator enrollment screen. At that release, the account was waiting for its own phone enrollment; existing roles and MFA registrations were preserved. On 2026-11-25 the user requested a testing-only pause of app MFA, described below.
 
 Observed before configuration on 2026-11-24:
 
@@ -47,3 +47,13 @@ Store the client secret only in Cloudflare's Google identity-provider configurat
 Cloudflare documents the Access `sub` as unique to an email address within an account. Changing identity providers does not require changing member IDs or resetting MFA. Do not delete and recreate the Zero Trust user, since that changes `sub` and breaks the existing identity binding.
 
 References: [Cloudflare Google integration](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/google/), [Access application token](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/).
+
+## Testing-only MFA pause (2026-11-25, v1.3.2)
+
+The user explicitly requested disabling app 2FA during testing. `APP_MFA_REQUIRED=false` takes effect only alongside an explicit `PHI_PROCESSING_APPROVED=false`. Missing or invalid flags, or PHI approval, enforce MFA by default. Google sign-in and all Staff authorization checks remain required. Google account security settings are not changed.
+
+Test sessions keep `verified_at=NULL`; they are never recorded as successful MFA. Their normal idle and maximum lifetime still apply. Recent-MFA gates follow the same server policy while role checks remain enforced. Existing authenticator secrets and recovery codes are retained. Set `APP_MFA_REQUIRED=true` and redeploy to restore challenges for test sessions before any work-data access. No database migration is needed.
+
+Validation: 60 automated tests passed, including Staff/identity/role enforcement without MFA, unchanged authenticator credentials, restoration of MFA for existing test sessions, explicit flag validation, PHI-mode enforcement, and idle expiry. English entry and Korean settings were inspected with an isolated synthetic identity.
+
+Live verification: Worker `27ca8188-9193-4e7b-b550-5fee17d752d5` deployed with both test flags explicitly false. Reloading the business account’s existing pending-MFA session reached the real dashboard without a code. Workspace settings displayed Google sign-in, the unchanged read-only role, and “Test mode · 2FA temporarily paused”.
